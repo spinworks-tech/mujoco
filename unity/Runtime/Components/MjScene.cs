@@ -88,6 +88,9 @@ public class MjScene : MonoBehaviour {
   public event EventHandler<MjStepArgs> postUpdateEvent;
   public event EventHandler<MjStepArgs> preDestroyEvent;
 
+  // Raised with the generated scene description before it is compiled.
+  public event EventHandler<XmlDocument> mjcfGeneratedEvent;
+
   protected unsafe void Start() {
     SceneRecreationAtLateUpdateRequested = false;
     CreateScene();
@@ -168,6 +171,7 @@ public class MjScene : MonoBehaviour {
       throw;
     }
     _generationContext = null;
+    mjcfGeneratedEvent?.Invoke(this, sceneMjcf);
 
     // Save the Mjcf to a file for debug purposes.
     var settings = MjGlobalSettings.Instance;
