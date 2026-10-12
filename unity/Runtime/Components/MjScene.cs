@@ -78,6 +78,10 @@ public class MjScene : MonoBehaviour {
 
   private List<MjComponent> _orderedComponents;
 
+  // The subset of _orderedComponents whose Unity pose follows the simulation. A geom with no body
+  // above it belongs to the world body and cannot move, so it has no pose to synchronize.
+  private List<MjComponent> _syncedComponents;
+
   public event EventHandler<MjStepArgs> postInitEvent;
   public event EventHandler<MjStepArgs> preUpdateEvent;
   public event EventHandler<MjStepArgs> ctrlCallback;
@@ -144,6 +148,10 @@ public class MjScene : MonoBehaviour {
     foreach (var root in hierarchyRoots) {
       _orderedComponents.AddRange(MjHierarchyTool.LinearizeHierarchyBFS(root));
     }
+    _syncedComponents = _orderedComponents
+        .Where(component => !(component is MjGeom) ||
+                            MjHierarchyTool.FindParentComponent<MjBaseBody>(component) != null)
+        .ToList();
 
     XmlDocument sceneMjcf = null;
     try {
@@ -194,7 +202,7 @@ public class MjScene : MonoBehaviour {
   }
 
   public unsafe void SyncUnityToMjState() {
-    foreach (var component in _orderedComponents) {
+    foreach (var component in _syncedComponents) {
       if (component != null && component.isActiveAndEnabled) {
         component.OnSyncState(Data);
       }
