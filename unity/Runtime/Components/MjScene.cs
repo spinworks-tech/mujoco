@@ -101,10 +101,14 @@ public class MjScene : MonoBehaviour {
   }
 
   protected unsafe void FixedUpdate() {
-    preUpdateEvent?.Invoke(this, new MjStepArgs(Model, Data));
+    preUpdateEvent?.Invoke(this, _stepArgs);
     StepScene();
-    postUpdateEvent?.Invoke(this, new MjStepArgs(Model, Data));
+    postUpdateEvent?.Invoke(this, _stepArgs);
   }
+
+  // The arguments of the per-step events. They only carry the model and data pointers, which change
+  // when the scene is compiled, so one instance serves every step instead of a new one per event.
+  private MjStepArgs _stepArgs;
 
   public bool SceneRecreationAtLateUpdateRequested = false;
 
@@ -198,6 +202,7 @@ public class MjScene : MonoBehaviour {
     if (Data == null) {
       throw new NullReferenceException("Model loaded but mj_makeData failed.");
     }
+    _stepArgs = new MjStepArgs(Model, Data);
 
     // Bind the components to their Mujoco counterparts.
     foreach (var component in components) {
@@ -331,6 +336,7 @@ public class MjScene : MonoBehaviour {
       MujocoLib.mj_deleteData(Data);
       Data = null;
     }
+    _stepArgs = null;
   }
 
   // Updates the scene and the state of Mujoco simulation.
@@ -342,7 +348,7 @@ public class MjScene : MonoBehaviour {
     Profiler.BeginSample("MjStep.mj_step");
     if (ctrlCallback != null){
       MujocoLib.mj_step1(Model, Data);
-      ctrlCallback?.Invoke(this, new MjStepArgs(Model, Data));
+      ctrlCallback?.Invoke(this, _stepArgs);
       MujocoLib.mj_step2(Model, Data);
     }
     else {
