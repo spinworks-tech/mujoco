@@ -82,6 +82,23 @@ public class MjScene : MonoBehaviour {
   // above it belongs to the world body and cannot move, so it has no pose to synchronize.
   private List<MjComponent> _syncedComponents;
 
+  // _syncedComponents split by what their synchronization does. Transform writers only present the
+  // simulation in Unity; the rest also exchange simulation inputs and readings (actuator controls,
+  // joint and sensor values, mocap targets).
+  private List<MjComponent> _transformComponents;
+  private List<MjComponent> _stateComponents;
+
+  // When StepScene writes Unity transforms.
+  public enum TransformSync {
+    // After every step, as upstream does.
+    EveryStep,
+    // Only when SyncUnityTransforms or SyncUnityToMjState is called: a caller that runs several steps
+    // per rendered frame writes transforms once per frame instead of once per step.
+    OnRequest
+  }
+
+  public TransformSync TransformSyncMode = TransformSync.EveryStep;
+
   public event EventHandler<MjStepArgs> postInitEvent;
   public event EventHandler<MjStepArgs> preUpdateEvent;
   public event EventHandler<MjStepArgs> ctrlCallback;
@@ -159,6 +176,12 @@ public class MjScene : MonoBehaviour {
         .Where(component => !(component is MjGeom) ||
                             MjHierarchyTool.FindParentComponent<MjBaseBody>(component) != null)
         .ToList();
+    _transformComponents = _syncedComponents
+        .Where(component => component is MjBody || component is MjGeom || component is MjSite)
+        .ToList();
+    _stateComponents = _syncedComponents
+        .Where(component => !(component is MjBody || component is MjGeom || component is MjSite))
+        .ToList();
 
     XmlDocument sceneMjcf = null;
     try {
@@ -211,7 +234,19 @@ public class MjScene : MonoBehaviour {
   }
 
   public unsafe void SyncUnityToMjState() {
-    foreach (var component in _syncedComponents) {
+    SyncComponents(_syncedComponents);
+  }
+
+  // Writes the simulated pose of every moving body, geom and site to its Unity transform, parents
+  // before children. With TransformSyncMode OnRequest, call it once after the frame's steps.
+  public unsafe void SyncUnityTransforms() {
+    Profiler.BeginSample("MjScene.SyncUnityTransforms");
+    SyncComponents(_transformComponents);
+    Profiler.EndSample();
+  }
+
+  private unsafe void SyncComponents(List<MjComponent> components) {
+    foreach (var component in components) {
       if (component != null && component.isActiveAndEnabled) {
         component.OnSyncState(Data);
       }
@@ -358,7 +393,14 @@ public class MjScene : MonoBehaviour {
     CheckForPhysicsException();
 
     Profiler.BeginSample("MjStep.OnSyncState");
-    SyncUnityToMjState();
+    switch (TransformSyncMode) {
+      case TransformSync.EveryStep:
+        SyncUnityToMjState();
+        break;
+      case TransformSync.OnRequest:
+        SyncComponents(_stateComponents);
+        break;
+    }
     Profiler.EndSample(); // MjStep.OnSyncState
     Profiler.EndSample(); // MjStep
   }
