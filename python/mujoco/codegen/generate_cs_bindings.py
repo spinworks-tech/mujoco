@@ -42,6 +42,22 @@ _BOILERPLATE_IMPORTS = [
     ),
 ]
 
+# Name of the native library for DllImport. Unity Web builds link MuJoCo
+# statically into the player, where P/Invoke targets must be "__Internal".
+_NATIVE_LIBRARY_CONSTANT = [
+    '#if UNITY_WEBGL && !UNITY_EDITOR',
+    'const string NativeLibrary = "__Internal";',
+    '#else',
+    'const string NativeLibrary = "mujoco";',
+    '#endif',
+]
+
+# MuJoCo's OpenGL renderer (mjr_) and UI (mjui_) are not built for Unity Web:
+# the player renders through Unity and the Web static libraries do not contain
+# them, so Web player builds must not declare them (the link would fail).
+_WEB_EXCLUDED_FUNCTION_PREFIXES = ('mjr_', 'mjui_')
+_WEB_EXCLUDED_BEGIN = '#if !(UNITY_WEBGL && !UNITY_EDITOR)'
+
 _CS_RESERVED_KEYWORDS = {
     'abstract',
     'as',
@@ -455,7 +471,9 @@ def _write_header(output):
   output.write(
       '\n'.join(
           _BOILERPLATE_IMPORTS
-          + ['namespace Mujoco {', 'public static class MujocoLib {\n']
+          + ['namespace Mujoco {', 'public static class MujocoLib {']
+          + _NATIVE_LIBRARY_CONSTANT
+          + ['']
       )
   )
 
@@ -714,14 +732,19 @@ def _write_functions(output):
 
     return_type, return_annotation = _func_return_to_cs(func_decl.return_type)
 
+    web_excluded = func_name.startswith(_WEB_EXCLUDED_FUNCTION_PREFIXES)
+    if web_excluded:
+      output.write('\n' + _WEB_EXCLUDED_BEGIN)
     output.write(
-        '\n[DllImport("mujoco", CallingConvention = CallingConvention.Cdecl)]\n'
+        '\n[DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]\n'
     )
     if return_annotation:
       output.write(f'[{return_annotation}]\n')
     output.write(
         f'public static unsafe extern {return_type} {name}({args_str});\n'
     )
+    if web_excluded:
+      output.write('#endif\n')
 
 
 def main(argv):
