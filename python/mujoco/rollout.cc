@@ -280,6 +280,21 @@ class Rollout {
     std::vector<raw::MjData*> data_ptrs(py::len(d));
     for (int t = 0; t < py::len(d); t++) {
       data_ptrs[t] = d[t].cast<MjDataWrapper*>()->get();
+      // rollout threads across simulations; the engine's pool threads within one
+      if (data_ptrs[t]->threadpool) {
+        std::ostringstream msg;
+        msg << "data[" << t << "] has a thread pool installed (mju_threadpool); "
+            << "rollout parallelizes across simulations and cannot use it";
+        throw py::value_error(msg.str());
+      }
+    }
+
+    // validate nstep and chunk_size
+    if (nstep < 0) {
+      throw py::value_error("nstep must be non-negative");
+    }
+    if (chunk_size.has_value() && *chunk_size <= 0) {
+      throw py::value_error("chunk_size must be a positive integer");
     }
 
     // check that some steps need to be taken, return if not
@@ -360,4 +375,3 @@ PYBIND11_MODULE(_rollout, pymodule, pybind11::mod_gil_not_used()) {
 }  // namespace
 
 }  // namespace mujoco::python
-

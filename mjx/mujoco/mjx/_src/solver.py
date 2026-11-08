@@ -148,10 +148,10 @@ class _LSPoint(PyTreeNode):
       jv: jax.Array,
       quad: jax.Array,
       quad_gauss: jax.Array,
-      uu: jax.Array,
+      u_perp_sq: jax.Array,
       v0: jax.Array,
-      uv: jax.Array,
-      vv: jax.Array,
+      u_par: jax.Array,
+      v_norm: jax.Array,
   ) -> '_LSPoint':
     """Creates a linesearch point with first and second derivatives."""
     # roughly corresponds to CGEval in mujoco/src/engine/engine_solver.c
@@ -179,7 +179,8 @@ class _LSPoint(PyTreeNode):
     if m.opt.cone == ConeType.ELLIPTIC:
       mu, u0 = ctx.fri[:, 0], ctx.u[:, 0]
       n = u0 + alpha * v0
-      tsqr = uu + alpha * (2 * uv + alpha * vv)
+      w_par = u_par + alpha * v_norm
+      tsqr = jp.square(w_par) + u_perp_sq
       t = jp.sqrt(tsqr)  # tangential force
 
       bottom_zone = ((tsqr <= 0) & (n < 0)) | ((tsqr > 0) & ((mu * n + t) <= 0))
@@ -199,13 +200,16 @@ class _LSPoint(PyTreeNode):
       t += (t == 0) * mujoco.mjMINVAL
       tsqr += (tsqr == 0) * mujoco.mjMINVAL
       n1 = v0
-      t1 = (uv + alpha * vv) / t
-      t2 = vv / t - (uv + alpha * vv) * t1 / tsqr
+      t1 = w_par * v_norm / t
+      # squared norm of (unit tangent) ^ v, folded with 1/T into (N/T - mu)
+      det = (u_perp_sq / tsqr) * jp.square(v_norm)
       dm = ctx.dm * middle_zone
       nmt = n - mu * t
       cost = 0.5 * jp.sum(dm * jp.square(nmt))
       deriv_0 = jp.sum(dm * nmt * (n1 - mu * t1))
-      deriv_1 = jp.sum(dm * (jp.square(n1 - mu * t1) - nmt * mu * t2))
+      deriv_1 = jp.sum(
+          dm * (jp.square(n1 - mu * t1) + (n / t - mu) * (-mu * det))
+      )
     elif m.opt.cone == ConeType.PYRAMIDAL:
       quad = jax.vmap(jp.multiply)(quad, active)  # only active
       quad_total += jp.sum(quad, axis=0)
@@ -303,7 +307,10 @@ def _update_constraint(m: Model, d: Data, ctx: Context) -> Context:
         )
     )
     u = slice_fn(efc_address) * ctx.fri
-    mu, n, t = ctx.fri[:, 0], u[:, 0], jax.vmap(math.norm)(u[:, 1:])
+    mu, n = ctx.fri[:, 0], u[:, 0]
+    # exact tangent norm, gradient-safe at 0 (math.norm flushes |x| <= 1e-8)
+    tsqr = jp.sum(jp.square(u[:, 1:]), axis=1)
+    t = jp.where(tsqr > 0, jp.sqrt(jp.where(tsqr > 0, tsqr, 1.0)), 0.0)
 
     # bottom zone: quadratic
     bottom_zone = ((t <= 0) & (n < 0)) | ((t > 0) & ((mu * n + t) <= 0))
@@ -338,19 +345,20 @@ def _update_constraint(m: Model, d: Data, ctx: Context) -> Context:
     # cone hessian
     h = 0.0
     if m.opt.solver == SolverType.NEWTON:
-      t = jp.maximum(t, mujoco.mjMINVAL)
-      # h = mu*N/T^3 * U*U'
-      ttt = jp.maximum(t * t * t, mujoco.mjMINVAL)
-      h = jax.vmap(lambda x, y: x * jp.outer(y, y.T))(mu * n / ttt, u)
+      t_safe = jp.where(middle_zone, t, 1.0)
+      # unit tangent: normalize before forming products so T^3 never appears
+      uhat = u / t_safe[:, None]
+      # h = (mu*N/T) * Uhat*Uhat'
+      h = jax.vmap(lambda x, y: x * jp.outer(y, y.T))(mu * n / t_safe, uhat)
       # add to diagonal: (mu^2 - mu*N/T) * I
-      h += jax.vmap(lambda x: x * jp.eye(6, 6))(mu * mu - mu * n / t)
-      # set first row: (1, -mu/T * U)
-      h_0 = jax.vmap(lambda mu, t, u: jp.append(1, -mu / t * u[1:]))(mu, t, u)
+      h += jax.vmap(lambda x: x * jp.eye(6, 6))(mu * mu - mu * n / t_safe)
+      # set first row: (1, -mu * Uhat)
+      h_0 = jax.vmap(lambda mu, uhat: jp.append(1, -mu * uhat[1:]))(mu, uhat)
       h = h.at[:, 0].set(h_0).at[:, :, 0].set(h_0)
       # pre and post multiply by diag(mu, friction), scale by Dm
       h *= jax.vmap(lambda d, f: d * jp.outer(f, f.T))(dm, ctx.fri)
       # only cone constraints
-      h = jax.vmap(jp.multiply)(h, middle_zone)
+      h = jp.where(middle_zone[:, None, None], h, 0.0)
   else:
     raise NotImplementedError(f'unsupported cone type: {m.opt.cone}')
 
@@ -418,8 +426,21 @@ def _update_gradient(m: Model, d: Data, ctx: Context) -> Context:
   return ctx
 
 
-def _rescale(m: Model, value: jax.Array) -> jax.Array:
-  return value / (m.stat.meaninertia * max(1, m.nv))
+def _trace_m(m: Model, d: Data) -> jax.Array:
+  if not isinstance(d._impl, DataJAX):
+    raise ValueError('_trace_m requires JAX backend implementation.')
+  if not m.nv:
+    return jp.array(mujoco.mjMINVAL)
+  trace = (
+      d._impl.M[m.M_rowadr + m.M_rownnz - 1].sum()
+      if support.is_sparse(m)
+      else jp.trace(d._impl.M)
+  )
+  return jp.maximum(mujoco.mjMINVAL, trace)
+
+
+def _rescale(m: Model, d: Data, value: jax.Array) -> jax.Array:
+  return value / _trace_m(m, d)
 
 
 def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
@@ -440,7 +461,7 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
   ):
     raise ValueError('_lineasearch requires JAX backend implementation.')
 
-  smag = math.norm(ctx.search) * m.stat.meaninertia * max(1, m.nv)
+  smag = math.norm(ctx.search) * _trace_m(m, d)
   gtol = m.opt.tolerance * m.opt.ls_tolerance * smag
 
   # compute Mv, Jv
@@ -455,7 +476,7 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
   ))
   quad = jp.stack((0.5 * ctx.Jaref * ctx.Jaref, jv * ctx.Jaref, 0.5 * jv * jv))
   quad = (quad * d._impl.efc_D).T
-  uu, v0, uv, vv = 0.0, 0.0, 0.0, 0.0
+  u_perp_sq, v0, u_par, v_norm = 0.0, 0.0, 0.0, 0.0
   if m.opt.cone == ConeType.ELLIPTIC:
     mask = d._impl.contact.dim > 1
     # complete vector quadratic (for bottom zone)
@@ -476,20 +497,43 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
     )
     efc_elliptic = d._impl.contact.efc_address[mask]
     v = jv_fn(efc_elliptic) * ctx.fri
-    uu = jp.sum(ctx.u[:, 1:] * ctx.u[:, 1:], axis=1)
+    u_tan, v_tan = ctx.u[:, 1:], v[:, 1:]
+    uu = jp.sum(u_tan * u_tan, axis=1)
     v0 = v[:, 0]
-    uv = jp.sum(ctx.u[:, 1:] * v[:, 1:], axis=1)
-    vv = jp.sum(v[:, 1:] * v[:, 1:], axis=1)
+    uv = jp.sum(u_tan * v_tan, axis=1)
+    vv = jp.sum(v_tan * v_tan, axis=1)
+
+    # decompose tangential u into components parallel and orthogonal to v
+    wedge = (
+        u_tan[:, :, None] * v_tan[:, None, :]
+        - u_tan[:, None, :] * v_tan[:, :, None]
+    )
+    det = 0.5 * jp.sum(jp.square(wedge), axis=(1, 2))
+    v_pos = vv > 0
+    vv_safe = jp.where(v_pos, vv, 1.0)
+    v_norm = jp.where(v_pos, jp.sqrt(vv_safe), 0.0)
+    v_norm_safe = jp.where(v_pos, v_norm, 1.0)
+    u_par = jp.where(v_pos, uv / v_norm_safe, 0.0)
+    u_perp_sq = jp.where(v_pos, det / vv_safe, uu)
 
   point_fn = lambda a: _LSPoint.create(
-      m, d, ctx, a, jv, quad, quad_gauss, uu, v0, uv, vv  # pyrefly: ignore[bad-argument-type]
+      m, d, ctx, a, jv, quad, quad_gauss, u_perp_sq, v0, u_par, v_norm  # pyrefly: ignore[bad-argument-type]
   )
+  # initialize interval
+  p0 = point_fn(jp.array(0.0))
+
+  # set acceptance tolerance to avoid exceeding gtol in f32: Cauchy-Schwarz
+  # bound on the derivative magnitude of the active constraint rows at alpha = 0
+  rows_0 = jp.maximum(p0.cost - quad_gauss[0], 0.0)
+  rows_2 = jp.maximum(0.5 * p0.deriv_1 - quad_gauss[2], 0.0)
+  dmag = 2.0 * jp.sqrt(rows_0 * rows_2) + jp.abs(quad_gauss[1])
+  gtol_accept = jp.maximum(gtol, 8 * jp.finfo(dmag.dtype).eps * dmag)
 
   def cond(ctx: _LSContext) -> jax.Array:
     done = ctx.ls_iter >= m.opt.ls_iterations
     done |= ~ctx.swap  # if we did not adjust the interval
-    done |= (ctx.lo.deriv_0 < 0) & (ctx.lo.deriv_0 > -gtol)
-    done |= (ctx.hi.deriv_0 > 0) & (ctx.hi.deriv_0 < gtol)
+    done |= (jp.abs(ctx.lo.deriv_0) < gtol_accept) & (ctx.lo.cost < p0.cost)
+    done |= (jp.abs(ctx.hi.deriv_0) < gtol_accept) & (ctx.hi.cost < p0.cost)
 
     return ~done
 
@@ -514,7 +558,11 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
     lo = jax.tree_util.tree_map(
         lambda x, y: jp.where(swap_lo_hi_next, y, x), lo, hi_next
     )
-    swap_hi_next = in_bracket(hi.deriv_0, hi_next.deriv_0)
+    # also accept a Newton step that crosses the minimizer from an undershooting
+    # hi, turning the one-sided search into an opposite-sign bracket
+    swap_hi_next = in_bracket(hi.deriv_0, hi_next.deriv_0) | (
+        (hi.deriv_0 < 0) & (hi_next.deriv_0 > 0)
+    )
     hi = jax.tree_util.tree_map(
         lambda x, y: jp.where(swap_hi_next, y, x), hi, hi_next
     )
@@ -528,12 +576,21 @@ def _linesearch(m: Model, d: Data, ctx: Context) -> Context:
     )
     swap = swap_lo_next | swap_lo_mid | swap_lo_hi_next
     swap = swap | swap_hi_next | swap_hi_mid | swap_hi_lo_next
+
+    # accept the lowest-cost converged candidate regardless of derivative sign
+    cand = jax.tree_util.tree_map(lambda *x: jp.stack(x), lo_next, hi_next, mid)
+    converged = (jp.abs(cand.deriv_0) < gtol_accept) & (cand.cost < p0.cost)
+    best = jp.argmin(jp.where(converged, cand.cost, jp.inf))
+    best = jax.tree_util.tree_map(lambda x: x[best], cand)
+    done = converged.any()
+    lo = jax.tree_util.tree_map(lambda x, y: jp.where(done, y, x), lo, best)
+    hi = jax.tree_util.tree_map(lambda x, y: jp.where(done, y, x), hi, best)
+    swap = swap & ~done
+
     ctx = ctx.replace(lo=lo, hi=hi, swap=swap, ls_iter=ctx.ls_iter + 1)
 
     return ctx
 
-  # initialize interval
-  p0 = point_fn(jp.array(0.0))
   lo = point_fn(p0.alpha - p0.deriv_0 / p0.deriv_1)
   lesser_fn = lambda x, y: jp.where(lo.deriv_0 < p0.deriv_0, x, y)
   hi = jax.tree_util.tree_map(lesser_fn, p0, lo)
@@ -560,8 +617,8 @@ def solve(m: Model, d: Data) -> Data:
     raise ValueError('solve requires JAX backend implementation.')
 
   def cond(ctx: Context) -> jax.Array:
-    improvement = _rescale(m, ctx.prev_cost - ctx.cost)
-    gradient = _rescale(m, math.norm(ctx.grad))
+    improvement = _rescale(m, d, ctx.prev_cost - ctx.cost)
+    gradient = _rescale(m, d, math.norm(ctx.grad))
 
     done = ctx.solver_niter >= m.opt.iterations
     done |= improvement < m.opt.tolerance

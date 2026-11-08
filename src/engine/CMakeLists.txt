@@ -60,6 +60,8 @@ set(MUJOCO_ENGINE_SRCS
     engine_macro.h
     engine_memory.c
     engine_memory.h
+    engine_metric.c
+    engine_metric.h
     engine_name.c
     engine_name.h
     engine_passive.c
@@ -97,6 +99,7 @@ set(MUJOCO_ENGINE_SRCS
     engine_util_sparse_avx.h
     engine_util_spatial.c
     engine_util_spatial.h
+    engine_util_spatial_avx.h
     engine_vis_init.c
     engine_vis_init.h
     engine_vis_interact.c

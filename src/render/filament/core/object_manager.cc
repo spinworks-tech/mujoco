@@ -28,14 +28,10 @@
 #include <math/vec2.h>
 #include <mujoco/mujoco.h>
 #include "render/filament/core/builtins.h"
+#include "render/filament/support/filament_util.h"
 #include "user/user_resource.h"
 
 namespace mujoco {
-
-std::string ResolveFilamentAssetPath(const std::string& filename) {
-  std::string path = "filament:" + filename;
-  return path;
-}
 
 static filament::Material* LoadMaterial(filament::Engine* engine,
                                         std::string_view filename) {
@@ -97,6 +93,7 @@ ObjectManager::ObjectManager(filament::Engine* engine) : engine_(engine) {
   materials_[kOutlineFlatten] = LoadMaterial(engine, "outline_flatten.filamat");
   materials_[kOutlineJumpFlood] =
       LoadMaterial(engine, "outline_jumpflood.filamat");
+  materials_[kHaze] = LoadMaterial(engine, "haze.filamat");
 
   static uint8_t black_rgb[3] = {0, 0, 0};
   static uint8_t white_rgb[3] = {255, 255, 255};

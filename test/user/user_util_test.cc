@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <mujoco/mujoco.h>
 #include "test/fixture.h"
 
 namespace mujoco {
@@ -66,14 +67,14 @@ TEST_F(UserUtilTest, PathReduceRepeatedSeparators) {
   EXPECT_EQ(FilePath("C:\\\\hello\\\\..\\\\world").Str(), "C:\\world");
 }
 
-TEST_F(UserUtilTest, PathReduceResourceProvider) {
+TEST_F(UserUtilTest, PathReduceProvider) {
   mjpResourceProvider provider = {
       .prefix = "testuserutil",
       .open = +[](mjResource*) { return 0; },
       .read = +[](mjResource*, const void**) { return 0; },
       .close = +[](mjResource*) {},
   };
-  mjp_registerResourceProvider(&provider);
+  mjp_registerProvider(&provider);
 
   EXPECT_EQ(FilePath("testuserutil:faces/right.png").Str(),
             "testuserutil:faces/right.png");
@@ -198,6 +199,34 @@ TEST_F(UserUtilTest, StringToVectorNan) {
 
 TEST_F(UserUtilTest, StringToVectorRange) {
   auto v = StringToVector<unsigned char>("-10");
+  EXPECT_EQ(errno, ERANGE);
+}
+
+TEST_F(UserUtilTest, StringToVectorSubnormalAndUnderflow) {
+  auto vf = StringToVector<float>("1e-40 -1e-45 0 1e-50 2.5");
+  ASSERT_EQ(vf.size(), 5);
+  EXPECT_GT(vf[0], 0.0f);
+  EXPECT_LT(vf[1], 0.0f);
+  EXPECT_EQ(vf[2], 0.0f);
+  EXPECT_EQ(vf[3], 0.0f);
+  EXPECT_EQ(vf[4], 2.5f);
+  EXPECT_EQ(errno, 0);
+
+  auto vd = StringToVector<double>("1e-315 -1e-320 1e-400 3.0");
+  ASSERT_EQ(vd.size(), 4);
+  EXPECT_GT(vd[0], 0.0);
+  EXPECT_LT(vd[1], 0.0);
+  EXPECT_EQ(vd[2], 0.0);
+  EXPECT_EQ(vd[3], 3.0);
+  EXPECT_EQ(errno, 0);
+
+  auto vnan = StringToVector<float>("nan 1e-40");
+  ASSERT_EQ(vnan.size(), 2);
+  EXPECT_THAT(vnan[0], IsNan());
+  EXPECT_GT(vnan[1], 0.0f);
+  EXPECT_EQ(errno, EDOM);
+
+  auto vovf = StringToVector<float>("1.0 1e40");
   EXPECT_EQ(errno, ERANGE);
 }
 

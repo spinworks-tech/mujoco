@@ -31,6 +31,7 @@ from mujoco.mjx._src.types import JointType
 from mujoco.mjx._src.types import Model
 from mujoco.mjx._src.types import ModelJAX
 from mujoco.mjx._src.types import ObjType
+from mujoco.mjx._src.types import TendonType
 from mujoco.mjx._src.types import TrnType
 from mujoco.mjx._src.types import WrapType
 # pylint: enable=g-importing-member
@@ -41,7 +42,7 @@ import numpy as np
 def kinematics(m: Model, d: Data) -> Data:
   """Converts position/velocity from generalized coordinates to maximal."""
   if m.impl == Impl.WARP and d.impl == Impl.WARP and mjxw.WARP_INSTALLED:
-    from mujoco.mjx.warp import smooth as mjxw_smooth  # pylint: disable=g-import-not-at-top  # pytype: disable=import-error
+    from mujoco.mjx.warp import smooth as mjxw_smooth  # pylint: disable=g-import-not-at-top  # pyrefly: ignore[missing-module-attribute]
     return mjxw_smooth.kinematics(m, d)
 
   def fn(carry, jnt_typs, jnt_pos, jnt_axis, qpos, qpos0, pos, quat):
@@ -139,6 +140,10 @@ def kinematics(m: Model, d: Data) -> Data:
 
 def com_pos(m: Model, d: Data) -> Data:
   """Maps inertias and motion dofs to global frame centered at subtree-CoM."""
+  if m.impl == Impl.WARP and d.impl == Impl.WARP and mjxw.WARP_INSTALLED:
+    from mujoco.mjx.warp import smooth as mjxw_smooth  # pylint: disable=g-import-not-at-top  # pyrefly: ignore[missing-module-attribute]
+
+    return mjxw_smooth.com_pos(m, d)
 
   if not isinstance(m._impl, ModelJAX) or not isinstance(d._impl, DataJAX):
     raise ValueError('com_pos requires JAX backend implementation.')
@@ -877,7 +882,7 @@ def rne_postconstraint(m: Model, d: Data) -> Data:
 def tendon(m: Model, d: Data) -> Data:
   """Computes tendon lengths and moments."""
   if m.impl == Impl.WARP and d.impl == Impl.WARP and mjxw.WARP_INSTALLED:
-    from mujoco.mjx.warp import smooth as mjxw_smooth  # pylint: disable=g-import-not-at-top  # pytype: disable=import-error
+    from mujoco.mjx.warp import smooth as mjxw_smooth  # pylint: disable=g-import-not-at-top  # pyrefly: ignore[missing-module-attribute]
     return mjxw_smooth.tendon(m, d)
 
   if not isinstance(m._impl, ModelJAX) or not isinstance(d._impl, DataJAX):
@@ -888,7 +893,7 @@ def tendon(m: Model, d: Data) -> Data:
 
   # process joint tendons
   (wrap_id_jnt,) = np.nonzero(m.wrap_type == WrapType.JOINT)
-  (tendon_id_jnt,) = np.nonzero(np.isin(m.tendon_adr, wrap_id_jnt))
+  (tendon_id_jnt,) = np.nonzero(m.tendon_type == TendonType.FIXED)
 
   ntendon_jnt = tendon_id_jnt.size
   wrap_objid_jnt = m.wrap_objid[wrap_id_jnt]
@@ -1026,7 +1031,7 @@ def tendon(m: Model, d: Data) -> Data:
       geom_xmat[wrap_inside_id],
       geom_size[wrap_inside_id],
       side[wrap_inside_id],
-      has_sidesite[wrap_inside_id],  # pyrefly: ignore[bad-argument-type]
+      has_sidesite[wrap_inside_id],
       is_sphere[wrap_inside_id],
       True,
       m._impl.wrap_inside_maxiter,
@@ -1041,7 +1046,7 @@ def tendon(m: Model, d: Data) -> Data:
       geom_xmat[wrap_outside_id],
       geom_size[wrap_outside_id],
       side[wrap_outside_id],
-      has_sidesite[wrap_outside_id],  # pyrefly: ignore[bad-argument-type]
+      has_sidesite[wrap_outside_id],
       is_sphere[wrap_outside_id],
       False,
       m._impl.wrap_inside_maxiter,

@@ -14,8 +14,8 @@
 # limitations under the License.
 
 if [ -n "${TEST_SRCDIR:-}" ]; then
-  readonly MODEL="${TEST_SRCDIR}/${TEST_WORKSPACE}/third_party/mujoco/model/sleep/dominos.xml"
-  readonly TARGET_BINARY="${TEST_SRCDIR}/${TEST_WORKSPACE}/third_party/mujoco/sample/testspeed"
+  readonly MODEL="${TEST_SRCDIR}/${TEST_WORKSPACE}/model/sleep/dominos.xml"
+  readonly TARGET_BINARY="${TEST_SRCDIR}/${TEST_WORKSPACE}/sample/testspeed"
 else
   MODEL="${CMAKE_SOURCE_DIR}/model/sleep/dominos.xml"
 fi
@@ -26,7 +26,7 @@ if [ -z "$TARGET_BINARY" ]; then
   die "Expecting environment variable TARGET_BINARY."
 fi
 
-if [ -z "$MUJOCO_DLL_DIR" ]; then
+if [ -n "$MUJOCO_DLL_DIR" ]; then
   # Extend PATH to include the directory containing the mujoco DLL.
   # This is needed on Windows.
   PATH=$PATH:$MUJOCO_DLL_DIR
@@ -73,5 +73,15 @@ echo "$OUTPUT" | grep -F "  integrator        : RK4" || die "Missing integrator 
 echo "$OUTPUT" | grep -F "  iterations        : 12" || die "Missing iterations print"
 echo "$OUTPUT" | grep -E "  tolerance         : (1e-0?7|0.0000001|1e-7)" || die "Missing tolerance print"
 echo "$OUTPUT" | grep -F "  noslip_iterations : 5" || die "Missing noslip_iterations print"
+if echo "$OUTPUT" | grep -Fq "worker thread"; then
+  die "Unexpected worker thread banner with default --nenginethread=0"
+fi
+
+# Verify --nenginethread worker thread banner for 1 and 2 worker threads.
+OUTPUT_T1=$("$TARGET_BINARY" --nstep=2 --nenginethread=1 "$MODEL") || die "testspeed --nenginethread=1 failed"
+echo "$OUTPUT_T1" | grep -F ", using 1 worker thread..." || die "Missing 1 worker thread banner"
+
+OUTPUT_T2=$("$TARGET_BINARY" --nstep=2 --nenginethread=2 "$MODEL") || die "testspeed --nenginethread=2 failed"
+echo "$OUTPUT_T2" | grep -F ", using 2 worker threads..." || die "Missing 2 worker threads banner"
 
 echo "PASS"

@@ -35,9 +35,6 @@ _d = mjwarp.Data(
 _o = mjwarp.Option(
     **{f.name: None for f in dataclasses.fields(mjwarp.Option) if f.init}
 )
-_s = mjwarp.Statistic(
-    **{f.name: None for f in dataclasses.fields(mjwarp.Statistic) if f.init}
-)
 _c = mjwarp.Contact(
     **{f.name: None for f in dataclasses.fields(mjwarp.Contact) if f.init}
 )
@@ -47,7 +44,6 @@ _e = mjwarp.Constraint(
 _cb = mjwp_types.Callback(
     **{f.name: None for f in dataclasses.fields(mjwp_types.Callback) if f.init}
 )
-
 
 @ffi.format_args_for_warp
 def _refit_bvh_shim(
@@ -69,6 +65,7 @@ def _refit_bvh_shim(
     geom_type: wp.array[int],
     nflex: int,
     nflexelem: int,
+    opt__deterministic: int,
     # Data
     flexvert_xpos: wp.array2d[wp.vec3],
     geom_xmat: wp.array2d[wp.mat33],
@@ -79,7 +76,6 @@ def _refit_bvh_shim(
     # Output token
     output_token: wp.array[int],
 ):
-  _m.stat = _s
   _m.opt = _o
   _m.callback = _cb
   _d.efc = _e
@@ -100,6 +96,7 @@ def _refit_bvh_shim(
   _m.geom_type = geom_type
   _m.nflex = nflex
   _m.nflexelem = nflexelem
+  _m.opt.deterministic = opt__deterministic
   _d.flexvert_xpos = flexvert_xpos
   _d.geom_xmat = geom_xmat
   _d.geom_xpos = geom_xpos
@@ -145,6 +142,7 @@ def _refit_bvh_jax_impl(
       m.geom_type,
       m.nflex,
       m._impl.nflexelem,
+      m.opt._impl.deterministic,
       d._impl.flexvert_xpos,
       d.geom_xmat,
       d.geom_xpos,

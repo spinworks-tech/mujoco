@@ -28,10 +28,10 @@
 #include <mujoco/mujoco.h>
 #include "experimental/filament/compat/scene_geom_util.h"
 #include "experimental/filament/compat/scene_objects.h"
-#include "render/filament/mjrfilament_cpp.h"
 #include "render/filament/support/filament_util.h"
+#include "render/filament/support/mjrf_ptr.h"
 #include "render/filament/support/model_lights.h"
-#include "render/filament/support/model_objects.h"
+#include "render/filament/support/model_resources.h"
 
 namespace mujoco {
 
@@ -40,29 +40,30 @@ using filament::math::float4;
 using filament::math::mat3;
 using filament::math::mat4;
 
-SceneBridge::SceneBridge(mjrfContext* ctx, mjrfScene* scene, const mjModel* model)
+SceneBridge::SceneBridge(mjrfContext* ctx, mjrfScene* scene,
+                         const mjModel* model)
     : ctx_(ctx), scene_(scene) {
-  model_objects_ = std::make_unique<ModelObjects>(model, ctx_);
+  model_resources_ = std::make_unique<ModelResources>(model, ctx_);
   scene_objects_ = std::make_unique<SceneObjects>(ctx_);
 
   mjrf_configureSceneFromModel(scene_, model);
 
-  auto clear_color = ReadElement(model, "filament.clearColor",
+  auto clear_color = ReadElement(model, "filament.clear_color",
                                  filament::math::float4(0, 0, 0, 1));
   mjrf_setClearColor(ctx_, &clear_color[0]);
 
-  model_lights_ = std::make_unique<ModelLights>(scene_, model_objects_.get());
+  model_lights_ = std::make_unique<ModelLights>(scene_, model_resources_.get());
 }
 
 SceneBridge::~SceneBridge() {
   model_lights_.reset();
   for (auto& iter : renderables_) {
-    mjrf_removeRenderableFromScene(scene_, iter.get());
+    mjrf_removeSceneRenderable(scene_, iter.get());
   }
   renderables_.clear();
 }
 
-std::optional<float3> SceneBridge::ClipFromWorld(const float3& pos) const{
+std::optional<float3> SceneBridge::ClipFromWorld(const float3& pos) const {
   const float4 clip_pos = clip_from_world_ * float4(pos, 1.0f);
   if (clip_pos.w == 0.0f) {
     return std::nullopt;
@@ -98,7 +99,7 @@ mat4 CalculateClipFromWorld(const mjrRect& viewport, const mjrCamera& cam) {
 }
 
 void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
-  const mjModel* model = model_objects_->GetModel();
+  const mjModel* model = model_resources_->GetModel();
 
   model_lights_->Update();
 
@@ -107,7 +108,7 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
 
   // Remove all drawables from previous render and prepare new ones.
   for (auto& iter : renderables_) {
-    mjrf_removeRenderableFromScene(scene_, iter.get());
+    mjrf_removeSceneRenderable(scene_, iter.get());
   }
   renderables_.clear();
   for (int i = 0; i < scene->ngeom; ++i) {
@@ -136,7 +137,8 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
       const int vertnum = scene->flexvertnum[geom->objid];
       const float radius = model->flex_radius[geom->objid];
 
-      if (scene->flexvertopt) {
+      if (geom->dataid <= 0 && scene->flexvertopt &&
+          !(scene->flexskinopt && scene->flexfaceused[geom->objid])) {
         // Use small spheres to represent vertices.
         const float rot[] = {1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f};
         const float size[] = {radius, radius, radius};
@@ -145,20 +147,23 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
           mjrf_setRenderableGeomMesh(vertex.get(), mjGEOM_SPHERE, 3, 3, 3);
           mjrf_setRenderableMaterial(vertex.get(), &material);
           mjrf_setRenderableSize(vertex.get(), size);
-          mjrf_setRenderableTransform(vertex.get(), scene->flexvert + 3*v, rot);
-          mjrf_addRenderableToScene(scene_, vertex.get());
+          mjrf_setRenderablePose(vertex.get(), scene->flexvert + 3 * v, rot);
+          mjrf_addSceneRenderable(scene_, vertex.get());
           renderables_.push_back(std::move(vertex));
         }
       }
 
-      if (scene->flexedgeopt) {
+      if (geom->dataid <= 0 && scene->flexedgeopt &&
+          !(scene->flexskinopt && scene->flexfaceused[geom->objid])) {
         const int edgeadr = scene->flexedgeadr[geom->objid];
         const int edgenum = scene->flexedgenum[geom->objid];
 
         // Use small thin cylinders to represent the edges.
         for (int e = edgeadr; e < edgeadr + edgenum; ++e) {
-          const float* v1 = scene->flexvert + 3 * (vertadr + scene->flexedge[2*e]);
-          const float* v2 = scene->flexvert + 3 * (vertadr + scene->flexedge[2*e+1]);
+          const float* v1 =
+              scene->flexvert + 3 * (vertadr + scene->flexedge[2 * e]);
+          const float* v2 =
+              scene->flexvert + 3 * (vertadr + scene->flexedge[2 * e + 1]);
           const mjtNum vec[3] = {v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]};
 
           const float pos[3]{
@@ -172,15 +177,11 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
           mjtNum edgemat[9];
           mju_quat2Mat(edgemat, quat);
           const float rot[9] = {
-            static_cast<float>(edgemat[0]),
-            static_cast<float>(edgemat[1]),
-            static_cast<float>(edgemat[2]),
-            static_cast<float>(edgemat[3]),
-            static_cast<float>(edgemat[4]),
-            static_cast<float>(edgemat[5]),
-            static_cast<float>(edgemat[6]),
-            static_cast<float>(edgemat[7]),
-            static_cast<float>(edgemat[8]),
+              static_cast<float>(edgemat[0]), static_cast<float>(edgemat[1]),
+              static_cast<float>(edgemat[2]), static_cast<float>(edgemat[3]),
+              static_cast<float>(edgemat[4]), static_cast<float>(edgemat[5]),
+              static_cast<float>(edgemat[6]), static_cast<float>(edgemat[7]),
+              static_cast<float>(edgemat[8]),
           };
 
           const float len = static_cast<float>(mju_norm3(vec));
@@ -190,24 +191,24 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
           mjrf_setRenderableGeomMesh(vertex.get(), mjGEOM_CYLINDER, 3, 3, 3);
           mjrf_setRenderableMaterial(vertex.get(), &material);
           mjrf_setRenderableSize(vertex.get(), size);
-          mjrf_setRenderableTransform(vertex.get(), pos, rot);
-          mjrf_addRenderableToScene(scene_, vertex.get());
+          mjrf_setRenderablePose(vertex.get(), pos, rot);
+          mjrf_addSceneRenderable(scene_, vertex.get());
           renderables_.push_back(std::move(vertex));
         }
       }
     }
 
     if (geom->type == mjGEOM_FLEX || geom->type == mjGEOM_SKIN) {
-      if (!scene_objects_->CreateSkinFlexMesh(scene, model_objects_->GetModel(),
-                                              *geom)) {
+      if (!scene_objects_->CreateSkinFlexMesh(
+              scene, model_resources_->GetModel(), *geom)) {
         continue;
       }
     }
 
     UniquePtr<mjrfRenderable> renderable = CreateGeomRenderable(
-        *geom, ctx_, model_objects_.get(), scene_objects_.get());
+        *geom, ctx_, model_resources_.get(), scene_objects_.get());
 
-    mjrf_addRenderableToScene(scene_, renderable.get());
+    mjrf_addSceneRenderable(scene_, renderable.get());
     renderables_.push_back(std::move(renderable));
   }
 
@@ -223,7 +224,7 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
       headlight_color_[2] = scene_light.diffuse[2];
     } else if (mjrfLight* light = model_lights_->GetLight(scene_light.id)) {
       mjrf_setLightColor(light, scene_light.diffuse);
-      mjrf_setLightTransform(light, scene_light.pos, scene_light.dir);
+      mjrf_setLightPose(light, scene_light.pos, scene_light.dir);
     } else {
       mju_error("Unexpected light id: %d", scene_light.id);
     }
@@ -231,15 +232,15 @@ void SceneBridge::Update(const mjrRect& viewport, const mjvScene* scene) {
 }
 
 void SceneBridge::UploadMesh(const mjModel* model, int id) {
-  model_objects_->UploadMesh(model, id);
+  model_resources_->UploadMesh(model, id);
 }
 
 void SceneBridge::UploadTexture(const mjModel* model, int id) {
-  model_objects_->UploadTexture(model, id);
+  model_resources_->UploadTexture(model, id);
 }
 
 void SceneBridge::UploadHeightField(const mjModel* model, int id) {
-  model_objects_->UploadHeightField(model, id);
+  model_resources_->UploadHeightField(model, id);
 }
 
 void SceneBridge::SetDrawTextFunction(DrawTextAtFn fn) {

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <optional>
+
 #include "private.h"
 #include "raw.h"
 #include <pybind11/cast.h>
@@ -100,6 +102,24 @@ struct MjSpec {
   ~MjSpec();
 
   raw::MjModel* Compile(mjVFS* vfs = nullptr);
+
+  // Makes the inertial which compilation infers for a body part of the spec.
+  void AdoptInertial(raw::MjsBody* body, mjVFS* vfs = nullptr);
+
+  // Fuses the static bodies of the spec with their parents, returns the number
+  // fused.
+  int FuseStatic(mjVFS* vfs = nullptr);
+
+  // Discards the visual elements of the spec, returns the number discarded.
+  int DiscardVisual(mjVFS* vfs = nullptr);
+
+  // Merges the duplicate textures and meshes of the spec, returns the number
+  // merged.
+  int DedupAssets();
+
+  // Returns the VFS which the assets of the spec are read from: the one given,
+  // or local_vfs filled with `assets`, which the caller must then delete.
+  mjVFS* AssetsVfs(mjVFS* vfs, std::optional<mjVFS>& local_vfs);
 
   raw::MjSpec* ptr;
   py::dict assets;

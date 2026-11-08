@@ -16,6 +16,7 @@
 
 // NOLINTBEGIN(whitespace/line_length)
 // NOLINTBEGIN(whitespace/semicolon)
+// NOLINTBEGIN(misc-include-cleaner)
 
 #include "wasm/codegen/generated/bindings.h"
 
@@ -1085,7 +1086,7 @@ void MjsSensor::set(mjsSensor* ptr) {
   ptr_ = ptr;
 }
 
-MjsDefault::MjsDefault(mjsDefault *ptr) : ptr_(ptr), element(ptr_->element), joint(ptr_->joint), geom(ptr_->geom), site(ptr_->site), camera(ptr_->camera), light(ptr_->light), flex(ptr_->flex), mesh(ptr_->mesh), material(ptr_->material), pair(ptr_->pair), equality(ptr_->equality), tendon(ptr_->tendon), actuator(ptr_->actuator) {}
+MjsDefault::MjsDefault(mjsDefault *ptr) : ptr_(ptr), element(ptr_->element), joint(ptr_->joint), geom(ptr_->geom), site(ptr_->site), camera(ptr_->camera), light(ptr_->light), flex(ptr_->flex), mesh(ptr_->mesh), texture(ptr_->texture), material(ptr_->material), pair(ptr_->pair), equality(ptr_->equality), tendon(ptr_->tendon), actuator(ptr_->actuator) {}
 mjsDefault* MjsDefault::get() const {
   return ptr_;
 }
@@ -1421,6 +1422,15 @@ int mj_setLengthRange_wrapper(const MjModel& m, const MjData& d, int index, cons
     mju_error("%s", error.data());
   }
   return result;
+}
+
+std::unique_ptr<MjModel> mj_embedAssets_wrapper(const MjModel& m) {
+  std::array<char, 1024> error;
+  mjModel* model = mj_embedAssets(m.get(), error.data(), error.size());
+  if (!model) {
+    mju_error("%s", error.data());
+  }
+  return std::unique_ptr<MjModel>(new MjModel(model));
 }
 
 void mju_info_wrapper(int topic, const String& msg) {
@@ -2300,8 +2310,8 @@ std::optional<MjsText> mjs_addText_wrapper(MjSpec& s) {
   return MjsText(result);
 }
 
-std::optional<MjsTexture> mjs_addTexture_wrapper(MjSpec& s) {
-  mjsTexture* result = mjs_addTexture(s.get());
+std::optional<MjsTexture> mjs_addTexture_wrapper(MjSpec& s, const MjsDefault& def) {
+  mjsTexture* result = mjs_addTexture(s.get(), def.get());
   if (result == nullptr) {
     return std::nullopt;
   }
@@ -2314,6 +2324,10 @@ std::optional<MjsTuple> mjs_addTuple_wrapper(MjSpec& s) {
     return std::nullopt;
   }
   return MjsTuple(result);
+}
+
+int mjs_adoptInertial_wrapper(MjsBody& body, const MjVFS& vfs) {
+  return mjs_adoptInertial(body.get(), vfs.get());
 }
 
 std::optional<MjsActuator> mjs_asActuator_wrapper(MjsElement& element) {
@@ -2518,6 +2532,10 @@ std::optional<MjsElement> mjs_attach_wrapper(MjsElement& parent, const MjsElemen
   return MjsElement(result);
 }
 
+int mjs_dedupAssets_wrapper(MjSpec& s) {
+  return mjs_dedupAssets(s.get());
+}
+
 void mjs_defaultActuator_wrapper(MjsActuator& actuator) {
   mjs_defaultActuator(actuator.get());
 }
@@ -2627,6 +2645,10 @@ void mjs_deleteUserValue_wrapper(MjsElement& element, const String& key) {
   mjs_deleteUserValue(element.get(), key.as<const std::string>().data());
 }
 
+int mjs_discardVisual_wrapper(MjSpec& s, const MjVFS& vfs) {
+  return mjs_discardVisual(s.get(), vfs.get());
+}
+
 std::optional<MjsBody> mjs_findBody_wrapper(const MjSpec& s, const String& name) {
   CHECK_VAL(name);
   mjsBody* result = mjs_findBody(s.get(), name.as<const std::string>().data());
@@ -2695,6 +2717,10 @@ std::optional<MjsElement> mjs_firstElement_wrapper(const MjSpec& s, mjtObj type)
     return std::nullopt;
   }
   return MjsElement(result);
+}
+
+int mjs_fuseStatic_wrapper(MjSpec& s, const MjVFS& vfs) {
+  return mjs_fuseStatic(s.get(), vfs.get());
 }
 
 std::optional<MjsCompiler> mjs_getCompiler_wrapper(const MjsElement& element) {
@@ -3898,6 +3924,19 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjVERTEX_ATTRIBUTE_USAGE_TANGENTS", mjVERTEX_ATTRIBUTE_USAGE_TANGENTS)
     .value("mjVERTEX_ATTRIBUTE_USAGE_UV", mjVERTEX_ATTRIBUTE_USAGE_UV)
     .value("mjVERTEX_ATTRIBUTE_USAGE_COLOR", mjVERTEX_ATTRIBUTE_USAGE_COLOR);
+  enum_<mjtActuator>("mjtActuator")
+    .value("mjACTUATOR_GENERAL", mjACTUATOR_GENERAL)
+    .value("mjACTUATOR_MOTOR", mjACTUATOR_MOTOR)
+    .value("mjACTUATOR_POSITION", mjACTUATOR_POSITION)
+    .value("mjACTUATOR_VELOCITY", mjACTUATOR_VELOCITY)
+    .value("mjACTUATOR_INTVELOCITY", mjACTUATOR_INTVELOCITY)
+    .value("mjACTUATOR_DAMPER", mjACTUATOR_DAMPER)
+    .value("mjACTUATOR_CYLINDER", mjACTUATOR_CYLINDER)
+    .value("mjACTUATOR_MUSCLE", mjACTUATOR_MUSCLE)
+    .value("mjACTUATOR_ADHESION", mjACTUATOR_ADHESION)
+    .value("mjACTUATOR_PID", mjACTUATOR_PID)
+    .value("mjACTUATOR_ORIENTATION", mjACTUATOR_ORIENTATION)
+    .value("mjACTUATOR_DCMOTOR", mjACTUATOR_DCMOTOR);
   enum_<mjtAlignFree>("mjtAlignFree")
     .value("mjALIGNFREE_FALSE", mjALIGNFREE_FALSE)
     .value("mjALIGNFREE_TRUE", mjALIGNFREE_TRUE)
@@ -3965,6 +4004,8 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjCONDATA_POS", mjCONDATA_POS)
     .value("mjCONDATA_NORMAL", mjCONDATA_NORMAL)
     .value("mjCONDATA_TANGENT", mjCONDATA_TANGENT)
+    .value("mjCONDATA_LINVEL", mjCONDATA_LINVEL)
+    .value("mjCONDATA_ANGVEL", mjCONDATA_ANGVEL)
     .value("mjNCONDATA", mjNCONDATA);
   enum_<mjtCone>("mjtCone")
     .value("mjCONE_PYRAMIDAL", mjCONE_PYRAMIDAL)
@@ -3996,7 +4037,8 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjINPUT_VEL", mjINPUT_VEL)
     .value("mjINPUT_FF", mjINPUT_FF)
     .value("mjINPUT_VOLTAGE", mjINPUT_VOLTAGE)
-    .value("mjINPUT_NONE", mjINPUT_NONE);
+    .value("mjINPUT_NONE", mjINPUT_NONE)
+    .value("mjINPUT_PRESSURE", mjINPUT_PRESSURE);
   enum_<mjtDataType>("mjtDataType")
     .value("mjDATATYPE_REAL", mjDATATYPE_REAL)
     .value("mjDATATYPE_POSITIVE", mjDATATYPE_POSITIVE)
@@ -4036,6 +4078,10 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjDYN_DCMOTOR", mjDYN_DCMOTOR)
     .value("mjDYN_PID", mjDYN_PID)
     .value("mjDYN_USER", mjDYN_USER);
+  enum_<mjtEmbed>("mjtEmbed")
+    .value("mjEMBED_FALSE", mjEMBED_FALSE)
+    .value("mjEMBED_TRUE", mjEMBED_TRUE)
+    .value("mjEMBED_AUTO", mjEMBED_AUTO);
   enum_<mjtEnableBit>("mjtEnableBit")
     .value("mjENBL_OVERRIDE", mjENBL_OVERRIDE)
     .value("mjENBL_ENERGY", mjENBL_ENERGY)
@@ -4044,6 +4090,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjENBL_SLEEP", mjENBL_SLEEP)
     .value("mjENBL_DIAGEXACT", mjENBL_DIAGEXACT)
     .value("mjENBL_IPC", mjENBL_IPC)
+    .value("mjENBL_SPECULATIVE", mjENBL_SPECULATIVE)
     .value("mjNENABLE", mjNENABLE);
   enum_<mjtEq>("mjtEq")
     .value("mjEQ_CONNECT", mjEQ_CONNECT)
@@ -4064,6 +4111,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjEVENT_RESIZE", mjEVENT_RESIZE)
     .value("mjEVENT_REDRAW", mjEVENT_REDRAW)
     .value("mjEVENT_FILESDROP", mjEVENT_FILESDROP);
+  enum_<mjtFlexSection>("mjtFlexSection")
+    .value("mjFLEXSECTION_CIRCLE", mjFLEXSECTION_CIRCLE)
+    .value("mjFLEXSECTION_BOX", mjFLEXSECTION_BOX);
   enum_<mjtFlexSelf>("mjtFlexSelf")
     .value("mjFLEXSELF_NONE", mjFLEXSELF_NONE)
     .value("mjFLEXSELF_NARROW", mjFLEXSELF_NARROW)
@@ -4229,7 +4279,13 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjMESH_BUILTIN_SUPERSPHERE", mjMESH_BUILTIN_SUPERSPHERE)
     .value("mjMESH_BUILTIN_SUPERTORUS", mjMESH_BUILTIN_SUPERTORUS)
     .value("mjMESH_BUILTIN_WEDGE", mjMESH_BUILTIN_WEDGE)
-    .value("mjMESH_BUILTIN_PLATE", mjMESH_BUILTIN_PLATE);
+    .value("mjMESH_BUILTIN_PLATE", mjMESH_BUILTIN_PLATE)
+    .value("mjMESH_BUILTIN_GRID", mjMESH_BUILTIN_GRID)
+    .value("mjMESH_BUILTIN_BOX", mjMESH_BUILTIN_BOX)
+    .value("mjMESH_BUILTIN_CYLINDER", mjMESH_BUILTIN_CYLINDER)
+    .value("mjMESH_BUILTIN_ELLIPSOID", mjMESH_BUILTIN_ELLIPSOID)
+    .value("mjMESH_BUILTIN_SQUARE", mjMESH_BUILTIN_SQUARE)
+    .value("mjMESH_BUILTIN_DISC", mjMESH_BUILTIN_DISC);
   enum_<mjtMeshInertia>("mjtMeshInertia")
     .value("mjMESH_INERTIA_CONVEX", mjMESH_INERTIA_CONVEX)
     .value("mjMESH_INERTIA_EXACT", mjMESH_INERTIA_EXACT)
@@ -4283,6 +4339,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjORIENTATION_XYAXES", mjORIENTATION_XYAXES)
     .value("mjORIENTATION_ZAXIS", mjORIENTATION_ZAXIS)
     .value("mjORIENTATION_EULER", mjORIENTATION_EULER);
+  enum_<mjtPassthrough>("mjtPassthrough")
+    .value("mjPASSTHROUGH_NONE", mjPASSTHROUGH_NONE)
+    .value("mjPASSTHROUGH_TEXTURES", mjPASSTHROUGH_TEXTURES);
   enum_<mjtPertBit>("mjtPertBit")
     .value("mjPERT_TRANSLATE", mjPERT_TRANSLATE)
     .value("mjPERT_ROTATE", mjPERT_ROTATE);
@@ -4314,6 +4373,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjRND_SEGMENT", mjRND_SEGMENT)
     .value("mjRND_IDCOLOR", mjRND_IDCOLOR)
     .value("mjRND_CULL_FACE", mjRND_CULL_FACE)
+    .value("mjRND_POST_PROCESSING", mjRND_POST_PROCESSING)
     .value("mjNRNDFLAG", mjNRNDFLAG);
   enum_<mjtSDFType>("mjtSDFType")
     .value("mjSDFTYPE_SINGLE", mjSDFTYPE_SINGLE)
@@ -4326,6 +4386,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjSAMEFRAME_INERTIA", mjSAMEFRAME_INERTIA)
     .value("mjSAMEFRAME_BODYROT", mjSAMEFRAME_BODYROT)
     .value("mjSAMEFRAME_INERTIAROT", mjSAMEFRAME_INERTIAROT);
+  enum_<mjtScaling>("mjtScaling")
+    .value("mjSCALING_SIMILAR", mjSCALING_SIMILAR)
+    .value("mjSCALING_GEOMETRY", mjSCALING_GEOMETRY);
   enum_<mjtSection>("mjtSection")
     .value("mjSECT_CLOSED", mjSECT_CLOSED)
     .value("mjSECT_OPEN", mjSECT_OPEN)
@@ -4415,6 +4478,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjSTATE_MOCAP_QUAT", mjSTATE_MOCAP_QUAT)
     .value("mjSTATE_USERDATA", mjSTATE_USERDATA)
     .value("mjSTATE_PLUGIN", mjSTATE_PLUGIN)
+    .value("mjSTATE_PLASTIC", mjSTATE_PLASTIC)
     .value("mjNSTATE", mjNSTATE)
     .value("mjSTATE_PHYSICS", mjSTATE_PHYSICS)
     .value("mjSTATE_FULLPHYSICS", mjSTATE_FULLPHYSICS)
@@ -4424,6 +4488,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .value("mjSTEREO_NONE", mjSTEREO_NONE)
     .value("mjSTEREO_QUADBUFFERED", mjSTEREO_QUADBUFFERED)
     .value("mjSTEREO_SIDEBYSIDE", mjSTEREO_SIDEBYSIDE);
+  enum_<mjtTendon>("mjtTendon")
+    .value("mjTENDON_FIXED", mjTENDON_FIXED)
+    .value("mjTENDON_SPATIAL", mjTENDON_SPATIAL);
   enum_<mjtTexture>("mjtTexture")
     .value("mjTEXTURE_2D", mjTEXTURE_2D)
     .value("mjTEXTURE_CUBE", mjTEXTURE_CUBE)
@@ -4532,16 +4599,19 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
 
   // Bindings for the MjData accessor classes.
   #define X(type, prefix, var, dim0, dim1) .property(#var, &Accessor::get_##var, &Accessor::set_##var)
+  #define XC(name) .property(#name, &Accessor::get_##name)
   #define X_ACCESSOR(NAME, Name, OBJTYPE, field, nfield)       \
     {                                                          \
       using Accessor = MjData##Name##Accessor;                 \
       emscripten::class_<Accessor>("MjData" #Name "Accessor")  \
           .property("id", &Accessor::id)                       \
           .property("name", &Accessor::name)                   \
-          MJDATA_##NAME;                                       \
+          MJDATA_##NAME                                        \
+          MJDATA_COMPUTED_##NAME;                              \
     }
     MJDATA_ACCESSORS
   #undef X
+  #undef XC
   #undef X_ACCESSOR
 
   emscripten::class_<MjContact>("MjContact")
@@ -4566,6 +4636,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("solimp", &MjContact::solimp)
     .property("solref", &MjContact::solref)
     .property("solreffriction", &MjContact::solreffriction)
+    .property("surfacevel", &MjContact::surfacevel)
     .property("vert", &MjContact::vert);
   emscripten::class_<MjData>("MjData")
     .constructor<MjModel *>()
@@ -4660,11 +4731,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("flexedge_velocity", &MjData::flexedge_velocity)
     .property("flexelem_aabb", &MjData::flexelem_aabb)
     .property("flexelem_krot", &MjData::flexelem_krot)
-    .property("flexvert_J", &MjData::flexvert_J)
     .property("flexvert_conage", &MjData::flexvert_conage)
     .property("flexvert_hessian", &MjData::flexvert_hessian)
     .property("flexvert_lambda", &MjData::flexvert_lambda)
-    .property("flexvert_length", &MjData::flexvert_length)
     .property("flexvert_xpos", &MjData::flexvert_xpos)
     .property("flg_energypos", &MjData::flg_energypos, &MjData::set_flg_energypos)
     .property("flg_energyvel", &MjData::flg_energyvel, &MjData::set_flg_energyvel)
@@ -4672,6 +4741,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("flg_subtreevel", &MjData::flg_subtreevel, &MjData::set_flg_subtreevel)
     .property("geom_xmat", &MjData::geom_xmat)
     .property("geom_xpos", &MjData::geom_xpos)
+    .property("geom_xquat", &MjData::geom_xquat)
     .property("history", &MjData::history)
     .property("iacc", &MjData::iacc)
     .property("iacc_smooth", &MjData::iacc_smooth)
@@ -4736,6 +4806,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("parena", &MjData::parena, &MjData::set_parena)
     .property("parent_awake_ind", &MjData::parent_awake_ind)
     .property("pbase", &MjData::pbase, &MjData::set_pbase)
+    .property("plastic", &MjData::plastic)
     .property("plugin", &MjData::plugin)
     .property("plugin_data", &MjData::plugin_data)
     .property("plugin_state", &MjData::plugin_state)
@@ -4767,6 +4838,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("signature", &MjData::signature, &MjData::set_signature)
     .property("site_xmat", &MjData::site_xmat)
     .property("site_xpos", &MjData::site_xpos)
+    .property("site_xquat", &MjData::site_xquat)
     .property("solver", &MjData::solver, reference())
     .property("solver_fwdinv", &MjData::solver_fwdinv)
     .property("solver_niter", &MjData::solver_niter)
@@ -4796,6 +4868,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("xfrc_applied", &MjData::xfrc_applied)
     .property("ximat", &MjData::ximat)
     .property("xipos", &MjData::xipos)
+    .property("xiquat", &MjData::xiquat)
     .property("xmat", &MjData::xmat)
     .property("xpos", &MjData::xpos)
     .property("xquat", &MjData::xquat);
@@ -4962,6 +5035,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("efm0_L_rowadr", &MjModel::efm0_L_rowadr)
     .property("efm0_L_rownnz", &MjModel::efm0_L_rownnz)
     .property("efm0_dofid", &MjModel::efm0_dofid)
+    .property("efmC_perm", &MjModel::efmC_perm)
     .property("eq_active0", &MjModel::eq_active0)
     .property("eq_data", &MjModel::eq_data)
     .property("eq_obj1id", &MjModel::eq_obj1id)
@@ -5011,6 +5085,8 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("flex_nodebodyid", &MjModel::flex_nodebodyid)
     .property("flex_nodenum", &MjModel::flex_nodenum)
     .property("flex_passive", &MjModel::flex_passive)
+    .property("flex_plasticadr", &MjModel::flex_plasticadr)
+    .property("flex_plasticmode", &MjModel::flex_plasticmode)
     .property("flex_priority", &MjModel::flex_priority)
     .property("flex_radius", &MjModel::flex_radius)
     .property("flex_rgba", &MjModel::flex_rgba)
@@ -5031,26 +5107,22 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("flex_vert0", &MjModel::flex_vert0)
     .property("flex_vertadr", &MjModel::flex_vertadr)
     .property("flex_vertbodyid", &MjModel::flex_vertbodyid)
-    .property("flex_vertedge", &MjModel::flex_vertedge)
-    .property("flex_vertedgeadr", &MjModel::flex_vertedgeadr)
-    .property("flex_vertedgenum", &MjModel::flex_vertedgenum)
-    .property("flex_vertmetric", &MjModel::flex_vertmetric)
+    .property("flex_vertcell", &MjModel::flex_vertcell)
     .property("flex_vertnum", &MjModel::flex_vertnum)
+    .property("flex_yield", &MjModel::flex_yield)
     .property("flexedge_J_colind", &MjModel::flexedge_J_colind)
     .property("flexedge_J_rowadr", &MjModel::flexedge_J_rowadr)
     .property("flexedge_J_rownnz", &MjModel::flexedge_J_rownnz)
     .property("flexedge_invweight0", &MjModel::flexedge_invweight0)
     .property("flexedge_length0", &MjModel::flexedge_length0)
     .property("flexedge_rigid", &MjModel::flexedge_rigid)
-    .property("flexvert_J_colind", &MjModel::flexvert_J_colind)
-    .property("flexvert_J_rowadr", &MjModel::flexvert_J_rowadr)
-    .property("flexvert_J_rownnz", &MjModel::flexvert_J_rownnz)
     .property("flg_adhesion", &MjModel::flg_adhesion, &MjModel::set_flg_adhesion)
     .property("flg_gravcomp", &MjModel::flg_gravcomp, &MjModel::set_flg_gravcomp)
     .property("flg_surfacevel", &MjModel::flg_surfacevel, &MjModel::set_flg_surfacevel)
     .property("geom_aabb", &MjModel::geom_aabb)
     .property("geom_adhesion", &MjModel::geom_adhesion)
     .property("geom_bodyid", &MjModel::geom_bodyid)
+    .property("geom_castshadow", &MjModel::geom_castshadow)
     .property("geom_conaffinity", &MjModel::geom_conaffinity)
     .property("geom_condim", &MjModel::geom_condim)
     .property("geom_contype", &MjModel::geom_contype)
@@ -5091,11 +5163,13 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("jnt_group", &MjModel::jnt_group)
     .property("jnt_limited", &MjModel::jnt_limited)
     .property("jnt_margin", &MjModel::jnt_margin)
+    .property("jnt_plasticadr", &MjModel::jnt_plasticadr)
     .property("jnt_pos", &MjModel::jnt_pos)
     .property("jnt_qposadr", &MjModel::jnt_qposadr)
     .property("jnt_range", &MjModel::jnt_range)
     .property("jnt_solimp", &MjModel::jnt_solimp)
     .property("jnt_solref", &MjModel::jnt_solref)
+    .property("jnt_springyield", &MjModel::jnt_springyield)
     .property("jnt_stiffness", &MjModel::jnt_stiffness)
     .property("jnt_stiffnesspoly", &MjModel::jnt_stiffnesspoly)
     .property("jnt_type", &MjModel::jnt_type)
@@ -5104,6 +5178,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("key_ctrl", &MjModel::key_ctrl)
     .property("key_mpos", &MjModel::key_mpos)
     .property("key_mquat", &MjModel::key_mquat)
+    .property("key_plastic", &MjModel::key_plastic)
     .property("key_qpos", &MjModel::key_qpos)
     .property("key_qvel", &MjModel::key_qvel)
     .property("key_time", &MjModel::key_time)
@@ -5180,7 +5255,6 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("nC", &MjModel::nC, &MjModel::set_nC)
     .property("nD", &MjModel::nD, &MjModel::set_nD)
     .property("nJfe", &MjModel::nJfe, &MjModel::set_nJfe)
-    .property("nJfv", &MjModel::nJfv, &MjModel::set_nJfv)
     .property("nJmom", &MjModel::nJmom, &MjModel::set_nJmom)
     .property("nJten", &MjModel::nJten, &MjModel::set_nJten)
     .property("nM", &MjModel::nM, &MjModel::set_nM)
@@ -5221,6 +5295,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("nconmax", &MjModel::nconmax, &MjModel::set_nconmax)
     .property("nefm0L", &MjModel::nefm0L, &MjModel::set_nefm0L)
     .property("nefm0dof", &MjModel::nefm0dof, &MjModel::set_nefm0dof)
+    .property("nefmCvert", &MjModel::nefmCvert, &MjModel::set_nefmCvert)
     .property("nemax", &MjModel::nemax, &MjModel::set_nemax)
     .property("neq", &MjModel::neq, &MjModel::set_neq)
     .property("nexclude", &MjModel::nexclude, &MjModel::set_nexclude)
@@ -5264,6 +5339,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("nout", &MjModel::nout, &MjModel::set_nout)
     .property("npair", &MjModel::npair, &MjModel::set_npair)
     .property("npaths", &MjModel::npaths, &MjModel::set_npaths)
+    .property("nplastic", &MjModel::nplastic, &MjModel::set_nplastic)
     .property("nplugin", &MjModel::nplugin, &MjModel::set_nplugin)
     .property("npluginattr", &MjModel::npluginattr, &MjModel::set_npluginattr)
     .property("npluginstate", &MjModel::npluginstate, &MjModel::set_npluginstate)
@@ -5397,20 +5473,24 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("tendon_margin", &MjModel::tendon_margin)
     .property("tendon_matid", &MjModel::tendon_matid)
     .property("tendon_num", &MjModel::tendon_num)
+    .property("tendon_plasticadr", &MjModel::tendon_plasticadr)
     .property("tendon_range", &MjModel::tendon_range)
     .property("tendon_rgba", &MjModel::tendon_rgba)
     .property("tendon_solimp_fri", &MjModel::tendon_solimp_fri)
     .property("tendon_solimp_lim", &MjModel::tendon_solimp_lim)
     .property("tendon_solref_fri", &MjModel::tendon_solref_fri)
     .property("tendon_solref_lim", &MjModel::tendon_solref_lim)
+    .property("tendon_springyield", &MjModel::tendon_springyield)
     .property("tendon_stiffness", &MjModel::tendon_stiffness)
     .property("tendon_stiffnesspoly", &MjModel::tendon_stiffnesspoly)
     .property("tendon_treeid", &MjModel::tendon_treeid)
     .property("tendon_treenum", &MjModel::tendon_treenum)
+    .property("tendon_type", &MjModel::tendon_type)
     .property("tendon_user", &MjModel::tendon_user)
     .property("tendon_width", &MjModel::tendon_width)
     .property("tex_adr", &MjModel::tex_adr)
     .property("tex_colorspace", &MjModel::tex_colorspace)
+    .property("tex_contenttypeadr", &MjModel::tex_contenttypeadr)
     .property("tex_data", &MjModel::tex_data)
     .property("tex_height", &MjModel::tex_height)
     .property("tex_nchannel", &MjModel::tex_nchannel)
@@ -5668,6 +5748,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("slidersite", &MjsActuator::slidersite, &MjsActuator::set_slidersite, reference())
     .property("target", &MjsActuator::target, &MjsActuator::set_target, reference())
     .property("trntype", &MjsActuator::trntype, &MjsActuator::set_trntype)
+    .property("type", &MjsActuator::type, &MjsActuator::set_type)
     .property("userdata", &MjsActuator::userdata, reference())
     .property("velrange", &MjsActuator::velrange);
   emscripten::class_<MjsAuthored>("MjsAuthored")
@@ -5687,6 +5768,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("element", &MjsBody::element, reference())
     .property("explicitinertial", &MjsBody::explicitinertial, &MjsBody::set_explicitinertial)
     .property("fullinertia", &MjsBody::fullinertia)
+    .property("fuse", &MjsBody::fuse, &MjsBody::set_fuse)
     .property("gravcomp", &MjsBody::gravcomp, &MjsBody::set_gravcomp)
     .property("ialt", &MjsBody::ialt, reference())
     .property("inertia", &MjsBody::inertia)
@@ -5738,6 +5820,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("inertiafromgeom", &MjsCompiler::inertiafromgeom, &MjsCompiler::set_inertiafromgeom)
     .property("inertiagrouprange", &MjsCompiler::inertiagrouprange)
     .property("meshdir", &MjsCompiler::meshdir, &MjsCompiler::set_meshdir, reference())
+    .property("passthrough", &MjsCompiler::passthrough, &MjsCompiler::set_passthrough)
+    .property("savecanonical", &MjsCompiler::savecanonical, &MjsCompiler::set_savecanonical)
+    .property("savecompiled", &MjsCompiler::savecompiled, &MjsCompiler::set_savecompiled)
     .property("saveinertial", &MjsCompiler::saveinertial, &MjsCompiler::set_saveinertial)
     .property("settotalmass", &MjsCompiler::settotalmass, &MjsCompiler::set_settotalmass)
     .property("texturedir", &MjsCompiler::texturedir, &MjsCompiler::set_texturedir, reference())
@@ -5755,7 +5840,8 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("mesh", &MjsDefault::mesh, reference())
     .property("pair", &MjsDefault::pair, reference())
     .property("site", &MjsDefault::site, reference())
-    .property("tendon", &MjsDefault::tendon, reference());
+    .property("tendon", &MjsDefault::tendon, reference())
+    .property("texture", &MjsDefault::texture, reference());
   emscripten::class_<MjsElement>("MjsElement")
     .property("elemtype", &MjsElement::elemtype, &MjsElement::set_elemtype)
     .property("signature", &MjsElement::signature, &MjsElement::set_signature);
@@ -5796,7 +5882,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("group", &MjsFlex::group, &MjsFlex::set_group)
     .property("info", &MjsFlex::info, &MjsFlex::set_info, reference())
     .property("margin", &MjsFlex::margin, &MjsFlex::set_margin)
-    .property("material", &MjsFlex::material, &MjsFlex::set_material, reference())
+    .property("material", &MjsFlex::material, reference())
     .property("node", &MjsFlex::node, reference())
     .property("nodebody", &MjsFlex::nodebody, reference())
     .property("order", &MjsFlex::order, &MjsFlex::set_order)
@@ -5805,11 +5891,15 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("priority", &MjsFlex::priority, &MjsFlex::set_priority)
     .property("radius", &MjsFlex::radius, &MjsFlex::set_radius)
     .property("rgba", &MjsFlex::rgba)
+    .property("section", &MjsFlex::section, &MjsFlex::set_section)
+    .property("sectionsize", &MjsFlex::sectionsize)
     .property("selfcollide", &MjsFlex::selfcollide, &MjsFlex::set_selfcollide)
+    .property("shear", &MjsFlex::shear, &MjsFlex::set_shear)
     .property("size", &MjsFlex::size)
     .property("solimp", &MjsFlex::solimp)
     .property("solmix", &MjsFlex::solmix, &MjsFlex::set_solmix)
     .property("solref", &MjsFlex::solref)
+    .property("stressyield", &MjsFlex::stressyield)
     .property("texcoord", &MjsFlex::texcoord, reference())
     .property("thickness", &MjsFlex::thickness, &MjsFlex::set_thickness)
     .property("vert", &MjsFlex::vert, reference())
@@ -5820,11 +5910,15 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("childclass", &MjsFrame::childclass, &MjsFrame::set_childclass, reference())
     .property("element", &MjsFrame::element, reference())
     .property("info", &MjsFrame::info, &MjsFrame::set_info, reference())
+    .property("massscale", &MjsFrame::massscale, &MjsFrame::set_massscale)
     .property("pos", &MjsFrame::pos)
-    .property("quat", &MjsFrame::quat);
+    .property("quat", &MjsFrame::quat)
+    .property("scale", &MjsFrame::scale)
+    .property("scaling", &MjsFrame::scaling, &MjsFrame::set_scaling);
   emscripten::class_<MjsGeom>("MjsGeom")
     .property("adhesion", &MjsGeom::adhesion, &MjsGeom::set_adhesion)
     .property("alt", &MjsGeom::alt, reference())
+    .property("castshadow", &MjsGeom::castshadow, &MjsGeom::set_castshadow)
     .property("conaffinity", &MjsGeom::conaffinity, &MjsGeom::set_conaffinity)
     .property("condim", &MjsGeom::condim, &MjsGeom::set_condim)
     .property("contype", &MjsGeom::contype, &MjsGeom::set_contype)
@@ -5888,6 +5982,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("solref_limit", &MjsJoint::solref_limit)
     .property("springdamper", &MjsJoint::springdamper)
     .property("springref", &MjsJoint::springref, &MjsJoint::set_springref)
+    .property("springyield", &MjsJoint::springyield, &MjsJoint::set_springyield)
     .property("stiffness", &MjsJoint::stiffness)
     .property("type", &MjsJoint::type, &MjsJoint::set_type)
     .property("userdata", &MjsJoint::userdata, reference());
@@ -5898,6 +5993,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("info", &MjsKey::info, &MjsKey::set_info, reference())
     .property("mpos", &MjsKey::mpos, reference())
     .property("mquat", &MjsKey::mquat, reference())
+    .property("plastic", &MjsKey::plastic, reference())
     .property("qpos", &MjsKey::qpos, reference())
     .property("qvel", &MjsKey::qvel, reference())
     .property("time", &MjsKey::time, &MjsKey::set_time);
@@ -5953,7 +6049,9 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("userface", &MjsMesh::userface, reference())
     .property("userfacenormal", &MjsMesh::userfacenormal, reference())
     .property("userfacetexcoord", &MjsMesh::userfacetexcoord, reference())
+    .property("usernode", &MjsMesh::usernode, reference())
     .property("usernormal", &MjsMesh::usernormal, reference())
+    .property("usertet", &MjsMesh::usertet, reference())
     .property("usertexcoord", &MjsMesh::usertexcoord, reference())
     .property("uservert", &MjsMesh::uservert, reference());
   emscripten::class_<MjsNumeric>("MjsNumeric")
@@ -6055,6 +6153,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("solref_friction", &MjsTendon::solref_friction)
     .property("solref_limit", &MjsTendon::solref_limit)
     .property("springlength", &MjsTendon::springlength)
+    .property("springyield", &MjsTendon::springyield, &MjsTendon::set_springyield)
     .property("stiffness", &MjsTendon::stiffness)
     .property("userdata", &MjsTendon::userdata, reference())
     .property("width", &MjsTendon::width, &MjsTendon::set_width);
@@ -6069,6 +6168,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .property("cubefiles", &MjsTexture::cubefiles, reference())
     .property("data", &MjsTexture::data, reference())
     .property("element", &MjsTexture::element, reference())
+    .property("embed", &MjsTexture::embed, &MjsTexture::set_embed)
     .property("file", &MjsTexture::file, &MjsTexture::set_file, reference())
     .property("gridlayout", &MjsTexture::gridlayout)
     .property("gridsize", &MjsTexture::gridsize)
@@ -6158,6 +6258,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
     .constructor<>()
     .function("copy", &MjvGeom::copy, take_ownership())
     .property("camdist", &MjvGeom::camdist, &MjvGeom::set_camdist)
+    .property("castshadow", &MjvGeom::castshadow, &MjvGeom::set_castshadow)
     .property("category", &MjvGeom::category, &MjvGeom::set_category)
     .property("dataid", &MjvGeom::dataid, &MjvGeom::set_dataid)
     .property("emission", &MjvGeom::emission, &MjvGeom::set_emission)
@@ -6457,6 +6558,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
   function("mjs_addText", &mjs_addText_wrapper);
   function("mjs_addTexture", &mjs_addTexture_wrapper);
   function("mjs_addTuple", &mjs_addTuple_wrapper);
+  function("mjs_adoptInertial", &mjs_adoptInertial_wrapper);
   function("mjs_asActuator", &mjs_asActuator_wrapper);
   function("mjs_asBody", &mjs_asBody_wrapper);
   function("mjs_asCamera", &mjs_asCamera_wrapper);
@@ -6482,6 +6584,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
   function("mjs_asTexture", &mjs_asTexture_wrapper);
   function("mjs_asTuple", &mjs_asTuple_wrapper);
   function("mjs_attach", &mjs_attach_wrapper);
+  function("mjs_dedupAssets", &mjs_dedupAssets_wrapper);
   function("mjs_defaultActuator", &mjs_defaultActuator_wrapper);
   function("mjs_defaultBody", &mjs_defaultBody_wrapper);
   function("mjs_defaultCamera", &mjs_defaultCamera_wrapper);
@@ -6509,6 +6612,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
   function("mjs_defaultTuple", &mjs_defaultTuple_wrapper);
   function("mjs_delete", &mjs_delete_wrapper);
   function("mjs_deleteUserValue", &mjs_deleteUserValue_wrapper);
+  function("mjs_discardVisual", &mjs_discardVisual_wrapper);
   function("mjs_findBody", &mjs_findBody_wrapper);
   function("mjs_findChild", &mjs_findChild_wrapper);
   function("mjs_findDefault", &mjs_findDefault_wrapper);
@@ -6517,6 +6621,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
   function("mjs_findSpec", &mjs_findSpec_wrapper);
   function("mjs_firstChild", &mjs_firstChild_wrapper);
   function("mjs_firstElement", &mjs_firstElement_wrapper);
+  function("mjs_fuseStatic", &mjs_fuseStatic_wrapper);
   function("mjs_getCompiler", &mjs_getCompiler_wrapper);
   function("mjs_getDefault", &mjs_getDefault_wrapper);
   function("mjs_getError", &mjs_getError_wrapper);
@@ -6708,6 +6813,7 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
   function("mj_saveModel", &mj_saveModel_wrapper);
   function("mj_saveLastXML", &mj_saveLastXML_wrapper);
   function("mj_setLengthRange", &mj_setLengthRange_wrapper);
+  function("mj_embedAssets", &mj_embedAssets_wrapper);
   function("mju_info", &mju_info_wrapper);
   // mj_compile is bound using two overloads to handle the optional MjVFS argument,
   // as using std::optional<MjVFS> caused memory errors due to missing copy/move constructors.
@@ -6825,5 +6931,6 @@ EMSCRIPTEN_BINDINGS(mujoco_bindings) {
 }
 
 }  // namespace mujoco::wasm
+// NOLINTEND(misc-include-cleaner)
 // NOLINTEND(whitespace/semicolon)
 // NOLINTEND(whitespace/line_length)

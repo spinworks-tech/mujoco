@@ -28,8 +28,8 @@ extern "C" {
 //------------------------------ tendons and actuators ---------------------------------------------
 
 // wrap tendons around spheres and cylinders
-mjtNum mju_wrap(mjtNum wpnt[6], const mjtNum x0[3], const mjtNum x1[3], const mjtNum xpos[3],
-                const mjtNum xmat[9], mjtNum radius, int type, const mjtNum side[3]);
+MJAPI mjtNum mju_wrap(mjtNum wpnt[6], const mjtNum x0[3], const mjtNum x1[3], const mjtNum xpos[3],
+                      const mjtNum xmat[9], mjtNum radius, int type, const mjtNum side[3]);
 
 // normalized muscle length-gain curve
 MJAPI mjtNum mju_muscleGainLength(mjtNum length, mjtNum lmin, mjtNum lmax);
@@ -92,12 +92,8 @@ MJAPI mjtNum mju_evalBasis(const mjtNum x[3], int i, int order);
 MJAPI void mju_evalBasisArray(mjtNum* basis, const mjtNum x[3], int order);
 
 // map global parametric coord to cell-local coord and build node indices
-MJAPI int mju_cellLookup(const mjtNum coord[3], const int cellnum[3], int order, mjtNum local[3],
-                         int* nodeindices);
-
-// interpolate a function at x with given interpolation coefficients and order n
-MJAPI void mju_interpolate3D(mjtNum res[3], const mjtNum x[3], const mjtNum* coeff, int order,
-                             const int* nodeindices);
+MJAPI int mju_cellLookup(const mjtNum coord[3], const int cellnum[3], int order,
+                         int cell, mjtNum local[3], int* nodeindices);
 
 // gather cell-local quantities and optionally compute rotation
 MJAPI void mju_flexGatherCellState(int order, int cy, int cz, int ci, int cj, int ck,
@@ -146,15 +142,6 @@ static inline mjtNum mju_flexDphi(mjtNum s, int i, int order) {
     default: return 0;
   }
 }
-// reconstruct interior node positions from boundary nodes via Transfinite Interpolation
-MJAPI void mju_shellTrackInterior(mjtNum* nodexpos, int nx, int ny, int nz);
-
-// compute TFI weights for an interior node (i,j,k) and distribute to boundary nodes
-MJAPI void mju_shellTFIWeights(int nx, int ny, int nz, int i, int j, int k,
-                               mjtNum w, int* nb, int* body, mjtNum* bweight,
-                               const int* nodebodyid, int nstart);
-
-
 // ----------------------------- Base64 ------------------------------------------------------------
 
 // encode data as Base64 into buf (including padding and null char)

@@ -32,7 +32,8 @@
 #include <vector>
 
 #include <mujoco/mujoco.h>
-#include "engine/engine_crossplatform.h"
+#include "engine/engine_crossplatform.h"  // IWYU pragma: keep
+#include "engine/engine_util_errmem.h"
 
 
 // workaround with locale bug on some MacOS machines
@@ -864,13 +865,13 @@ const char* mjuu_fullInertia(double quat[4], double inertia[3], const double ful
 
   mjuu_eig3(eigval, eigvec, quattmp, full);
 
-  // check mimimal eigenvalue
-  if (eigval[2] < mjEPS) { return "inertia must have positive eigenvalues"; }
-
-  // copy
+  // copy, also on error so that callers can bound the inertia
   if (quat) { mjuu_copyvec(quat, quattmp, 4); }
 
   if (inertia) { mjuu_copyvec(inertia, eigval, 3); }
+
+  // check minimal eigenvalue
+  if (eigval[2] < mjEPS) { return "inertia must have positive eigenvalues"; }
 
   return nullptr;
 }
@@ -903,14 +904,14 @@ bool mjuu_isabspath(std::string path) {
 
   // path is scheme:filename which we consider an absolute path
   // e.g. file URI's are always absolute paths
-  if (mjp_getResourceProvider(path.c_str()) != nullptr) { return true; }
+  if (mjp_findProvider(path.c_str()) != nullptr) { return true; }
 
   // check first char
   const char* str = path.c_str();
   if (str[0] == '\\' || str[0] == '/') { return true; }
 
   // find ":/" or ":\"
-  if (path.find(":/") != std::string::npos || path.find(":\\") != std::string::npos) {
+  if (path.find(":/") != std::string::npos || path.find(":\\") != std::string::npos) {  // NOLINT
     return true;
   }
 
@@ -1082,7 +1083,7 @@ std::string FilePath::AbsPrefix(const std::string& str) {
 
   // path is scheme:filename which we consider an absolute path
   // e.g. file URI's are always absolute paths
-  const mjpResourceProvider* provider = mjp_getResourceProvider(str.c_str());
+  const mjpResourceProvider* provider = mjp_findProvider(str.c_str());
   if (provider != nullptr) {
     std::size_t n = std::strlen(provider->prefix);
     std::size_t j = n + 1;
@@ -1123,7 +1124,7 @@ std::string FilePath::StrLower() const {
 
 // read file into memory buffer
 std::vector<uint8_t> FileToMemory(const char* filename) {
-  FILE* fp = fopen(filename, "rb");
+  FILE* fp = mju_fopen(filename, "rb");
   if (!fp) { return {}; }
 
   // find size
@@ -1191,10 +1192,10 @@ std::string VectorToString(const std::vector<T>& v) {
   return s;
 }
 
-template MJAPI std::string VectorToString(const std::vector<int>& v);
-template MJAPI std::string VectorToString(const std::vector<float>& v);
-template MJAPI std::string VectorToString(const std::vector<double>& v);
-template MJAPI std::string VectorToString(const std::vector<std::string>& v);
+template std::string VectorToString(const std::vector<int>& v);
+template std::string VectorToString(const std::vector<float>& v);
+template std::string VectorToString(const std::vector<double>& v);
+template std::string VectorToString(const std::vector<std::string>& v);
 
 namespace {
 
@@ -1211,6 +1212,7 @@ int StrToNum(char* str, char** c) {
 template <>
 float StrToNum(char* str, char** c) {
   float f = strtof(str, c);
+  if (errno == ERANGE && std::isfinite(f)) errno = 0;
   if (std::isnan(f)) errno = EDOM;
   return f;
 }
@@ -1218,6 +1220,7 @@ float StrToNum(char* str, char** c) {
 template <>
 double StrToNum(char* str, char** c) {
   double d = strtod(str, c);
+  if (errno == ERANGE && std::isfinite(d)) errno = 0;
   if (std::isnan(d)) errno = EDOM;
   return d;
 }
@@ -1244,33 +1247,40 @@ inline char* SkipSpace(char* c) {
 template <typename T>
 std::vector<T> StringToVector(char* cs) {
   std::vector<T> v;
-  char*          ch = cs;
+  char*          ch      = cs;
+  bool           has_nan = false;
 
   errno = 0;
   // reserve worst case
   v.reserve((std::strlen(cs) >> 1) + 1);
 
   for (;;) {
-    cs = SkipSpace(ch);                      // skip leading spaces
-    if (*cs == '\0') break;                  // end of string
+    cs = SkipSpace(ch);      // skip leading spaces
+    if (*cs == '\0') break;  // end of string
+    errno = 0;
     T num = StrToNum<T>(cs, &ch);            // parse number
     if (!IsNullOrSpace(ch)) errno = EINVAL;  // invalid separator
     if (cs == ch) errno = EINVAL;            // failed to parse number
-    if (errno && errno != EDOM) break;       // NaNs are quietly ignored
+    if (errno == EDOM) {
+      has_nan = true;
+      errno   = 0;
+    }
+    if (errno) break;  // NaNs are quietly ignored
     v.push_back(num);
   }
+  if (!errno && has_nan) errno = EDOM;
 
   v.shrink_to_fit();
   return v;
 }
 
 template <>
-MJAPI std::vector<std::string> StringToVector(char* cs) {
+std::vector<std::string> StringToVector(char* cs) {
   return StringToVector<std::string>(std::string(cs));
 }
 
 template <>
-MJAPI std::vector<std::string> StringToVector(const std::string& s) {
+std::vector<std::string> StringToVector(const std::string& s) {
   std::vector<std::string> v;
   std::stringstream        ss(s);
   std::string              word;
@@ -1278,19 +1288,19 @@ MJAPI std::vector<std::string> StringToVector(const std::string& s) {
   return v;
 }
 
-template MJAPI std::vector<int> StringToVector(char* cs);
-template MJAPI std::vector<float> StringToVector(char* cs);
-template MJAPI std::vector<double> StringToVector(char* cs);
-template MJAPI std::vector<unsigned char> StringToVector(char* cs);
+template std::vector<int>           StringToVector(char* cs);
+template std::vector<float>         StringToVector(char* cs);
+template std::vector<double>        StringToVector(char* cs);
+template std::vector<unsigned char> StringToVector(char* cs);
 
 
 template <typename T>
 std::vector<T> StringToVector(const std::string& s) {
   return StringToVector<T>(const_cast<char*>(s.c_str()));
 }
-template MJAPI std::vector<int> StringToVector(const std::string& s);
-template MJAPI std::vector<float> StringToVector(const std::string& s);
-template MJAPI std::vector<double> StringToVector(const std::string& s);
-template MJAPI std::vector<unsigned char> StringToVector(const std::string& s);
+template std::vector<int>           StringToVector(const std::string& s);
+template std::vector<float>         StringToVector(const std::string& s);
+template std::vector<double>        StringToVector(const std::string& s);
+template std::vector<unsigned char> StringToVector(const std::string& s);
 
 }  // namespace mujoco::user

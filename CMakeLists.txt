@@ -29,7 +29,7 @@ set(MSVC_INCREMENTAL_DEFAULT ON)
 
 project(
   mujoco
-  VERSION 3.15.0
+  VERSION 4.0.0
   DESCRIPTION "MuJoCo Physics Simulator"
   HOMEPAGE_URL "https://mujoco.org"
 )
@@ -113,6 +113,7 @@ include(MujocoDependencies)
 
 set(MUJOCO_HEADERS
     include/mujoco/mjassert.h
+    include/mujoco/mjbatch.h
     include/mujoco/mjdata.h
     include/mujoco/mjexport.h
     include/mujoco/mjmacro.h
@@ -153,11 +154,11 @@ target_include_directories(
 )
 
 if(NOT EMSCRIPTEN)
-  add_subdirectory(plugin/elasticity)
   add_subdirectory(plugin/actuator)
   add_subdirectory(plugin/sensor)
   add_subdirectory(plugin/sdf)
 endif()
+add_subdirectory(plugin/gmsh_decoder)
 add_subdirectory(plugin/obj_decoder)
 add_subdirectory(plugin/stl_decoder)
 
@@ -165,6 +166,7 @@ add_subdirectory(src/engine)
 add_subdirectory(src/user)
 add_subdirectory(src/xml)
 add_subdirectory(src/xml/mjz)
+add_subdirectory(src/batch)
 
 add_subdirectory(src/render/noop)
 
@@ -215,11 +217,38 @@ target_link_libraries(
 
 if(NOT EMSCRIPTEN)
   target_link_libraries(mujoco PRIVATE Threads::Threads)
+  if(APPLE)
+    target_link_options(
+      mujoco PRIVATE "-Wl,-unexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/mujoco.unexported_symbols"
+    )
+    set_property(
+      TARGET mujoco
+      APPEND
+      PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/mujoco.unexported_symbols"
+    )
+  elseif(UNIX)
+    target_link_options(
+      mujoco PRIVATE "-Wl,--version-script,${CMAKE_CURRENT_SOURCE_DIR}/mujoco.lds"
+    )
+    set_property(
+      TARGET mujoco
+      APPEND
+      PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/mujoco.lds"
+    )
+  endif()
 endif()
 
 set_target_properties(
   mujoco PROPERTIES VERSION "${mujoco_VERSION}" PUBLIC_HEADER "${MUJOCO_HEADERS}"
 )
+
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MUJOCO_ENABLE_LTO)
+  # Keep whole-program optimization (/GL + /LTCG) on the core mujoco DLL even
+  # when global CMAKE_INTERPROCEDURAL_OPTIMIZATION is disabled in CI: turning
+  # off /GL on mujoco exposes an MSVC /EHsc + longjmp stack-unwinding crash in
+  # SetConstTest.SleepingNotAllowed.
+  set_target_properties(mujoco PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
 
 # CMake's built-in FRAMEWORK option doesn't give us control over the dylib name inside the
 # Framework. We instead make our own Framework here.
@@ -272,7 +301,7 @@ if(MUJOCO_BUILD_SIMULATE)
 endif()
 
 if(MUJOCO_BUILD_STUDIO)
-  add_subdirectory(src/experimental/studio)
+  add_subdirectory(studio)
 endif()
 
 if(MUJOCO_BUILD_EXAMPLES)
@@ -287,16 +316,6 @@ if(MUJOCO_WITH_USD)
     DIRECTORY ${USD_INSTALL_ROOT}/
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
   )
-
-  if(APPLE)
-    set_target_properties(mujoco PROPERTIES
-      BUILD_RPATH "${USD_INSTALL_ROOT}"
-      INSTALL_RPATH "@loader_path")
-  elseif(UNIX)
-    set_target_properties(mujoco PROPERTIES
-      BUILD_RPATH "${USD_INSTALL_ROOT}"
-      INSTALL_RPATH "$ORIGIN")
-  endif()
 
   add_subdirectory(src/experimental/usd)
   add_subdirectory(plugin/usd_decoder)

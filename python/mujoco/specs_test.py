@@ -28,6 +28,18 @@ from etils import epath
 import mujoco
 import numpy as np
 
+# a 3x2 RGB PNG
+_TINY_PNG = bytes([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x02,
+    0x08, 0x02, 0x00, 0x00, 0x00, 0x12, 0x16, 0xf1, 0x4d, 0x00, 0x00, 0x00,
+    0x1c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0x78, 0xc1, 0xc0, 0xc0,
+    0xc0, 0xf0, 0xbf, 0xb8, 0xb8, 0x98, 0x81, 0xe1, 0x3f, 0xc3, 0xff, 0xff,
+    0xff, 0xc5, 0xc4, 0xc4, 0x00, 0x46, 0xd7, 0x07, 0x7f, 0xd2, 0x52, 0xa1,
+    0x41, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+    0x82,
+])
+
 
 def get_linenumber():
   cf = inspect.currentframe()
@@ -579,7 +591,37 @@ class SpecsTest(absltest.TestCase):
     self.assertEqual(model.mesh_vertnum[3], 2 * (4 + 1) * (4 + 2) + 2)
     self.assertEqual(model.mesh_vertnum[4], 2 + 10 * 4**2)
     self.assertEqual(model.mesh_vertnum[5], 100)
-    self.assertEqual(model.mesh_vertnum[6], 20 * (20 -1) + 2)
+    self.assertEqual(model.mesh_vertnum[6], 20 * (20 - 1) + 2)
+
+  def test_make_mesh_procedural(self):
+    spec = mujoco.MjSpec()
+
+    mesh_grid = spec.add_mesh(name='grid')
+    mesh_grid.make_grid(count=[4, 4, 4], spacing=[0.05, 0.05, 0.05], dim=3)
+
+    mesh_grid2d = spec.add_mesh(name='grid2d')
+    mesh_grid2d.make_grid(count=[4, 4, 1], spacing=[0.05, 0.05, 0], dim=2)
+
+    mesh_box = spec.add_mesh(name='box')
+    mesh_box.make_box(count=[3, 3, 3], spacing=[0.05, 0.05, 0.05], dim=3)
+
+    mesh_cyl = spec.add_mesh(name='cylinder')
+    mesh_cyl.make_cylinder(count=[3, 3, 3], spacing=[0.05, 0.05, 0.05], dim=3)
+
+    mesh_ell = spec.add_mesh(name='ellipsoid')
+    mesh_ell.make_ellipsoid(count=[3, 3, 3], spacing=[0.05, 0.05, 0.05], dim=3)
+
+    mesh_sq = spec.add_mesh(name='square')
+    mesh_sq.make_square(count=[4, 4, 1], spacing=[0.05, 0.05, 0])
+
+    mesh_disc = spec.add_mesh(name='disc')
+    mesh_disc.make_disc(count=[5, 5, 1], spacing=[0.05, 0.05, 0])
+
+    spec.worldbody.make_flex(name='flex_grid', mesh='grid')
+
+    model = spec.compile()
+    self.assertEqual(model.nmesh, 7)
+    self.assertEqual(model.nflex, 1)
 
   def test_compile_errors_with_line_info(self):
     spec = mujoco.MjSpec()
@@ -849,6 +891,25 @@ class SpecsTest(absltest.TestCase):
       geom = spec.worldbody.next_geom(geom)
       i += 1
 
+  def test_decoder_errors(self):
+    bad_stl = b'too short for an stl header'
+
+    # decoder error surfaces from mj_parse
+    with self.assertRaisesRegex(ValueError, 'stl_decoder: invalid header'):
+      mujoco.MjSpec.from_file('bad.stl', include={'bad.stl': bad_stl})
+
+    # decoder error surfaces from mesh compilation
+    spec = mujoco.MjSpec()
+    mesh = spec.add_mesh()
+    mesh.name = 'bad'
+    mesh.file = 'bad.stl'
+    geom = spec.worldbody.add_geom()
+    geom.type = mujoco.mjtGeom.mjGEOM_MESH
+    geom.meshname = 'bad'
+    spec.assets = {'bad.stl': bad_stl}
+    with self.assertRaisesRegex(ValueError, 'stl_decoder: invalid header'):
+      spec.compile()
+
   def test_assets(self):
     cube = """
       v -1 -1  1
@@ -881,7 +942,7 @@ class SpecsTest(absltest.TestCase):
       <compiler angle="radian"/>
 
       <asset>
-        <mesh name="cube" file="cube.obj"/>
+        <mesh name="cube" content_type="model/obj" file="cube.obj"/>
       </asset>
 
       <worldbody>
@@ -948,6 +1009,31 @@ class SpecsTest(absltest.TestCase):
     self.assertEqual(model.nsite, 10)
     self.assertEqual(model.nsensor, 9)
 
+  def test_frame_scale(self):
+    spec = mujoco.MjSpec()
+    frame = spec.worldbody.add_frame()
+    np.testing.assert_array_equal(frame.scale, [1, 1, 1])
+    self.assertEqual(frame.scaling, mujoco.mjtScaling.mjSCALING_SIMILAR)
+    frame.scale = 2
+    np.testing.assert_array_equal(frame.scale, [2, 2, 2])
+    frame.scale = np.float32(0.5)
+    np.testing.assert_array_equal(frame.scale, [0.5, 0.5, 0.5])
+    frame.scale = [1, 2, 3]
+    np.testing.assert_array_equal(frame.scale, [1, 2, 3])
+    with self.assertRaises(ValueError):
+      frame.scale = [1, 2]
+    frame.scaling = mujoco.mjtScaling.mjSCALING_GEOMETRY
+    self.assertEqual(frame.scaling, mujoco.mjtScaling.mjSCALING_GEOMETRY)
+    self.assertEqual(frame.massscale, 0)
+    frame.massscale = 2
+    self.assertEqual(frame.massscale, 2)
+    frame = spec.worldbody.add_frame(scale=3)
+    np.testing.assert_array_equal(frame.scale, [3, 3, 3])
+    frame = spec.worldbody.add_frame(scale=[1, 2, 3])
+    np.testing.assert_array_equal(frame.scale, [1, 2, 3])
+    with self.assertRaises(ValueError):
+      spec.worldbody.add_frame(scale=[1, 2])
+
   def test_delete_frame(self):
     spec = mujoco.MjSpec.from_string("""
       <mujoco>
@@ -991,43 +1077,56 @@ class SpecsTest(absltest.TestCase):
 
   def test_plugin(self):
     spec = mujoco.MjSpec()
-    spec.activate_plugin('mujoco.elasticity.cable')
+    spec.activate_plugin('mujoco.pid')
     plugin = spec.add_plugin(
         name='instance_name',
-        plugin_name='mujoco.elasticity.cable',
+        plugin_name='mujoco.pid',
         active=True,
         info='info'
     )
-    plugin.config = {'twist': '10', 'bend': '1'}
-    self.assertEqual(plugin.config, {'twist': '10', 'bend': '1'})
+    plugin.config = {'kp': '10', 'kd': '1'}
+    self.assertEqual(plugin.config, {'kp': '10', 'kd': '1'})
 
     body = spec.worldbody.add_body()
-    body.plugin = plugin
-    body.plugin.name = 'instance_name'
-    body.plugin.active = True
-
-    geom = body.add_geom()
-    geom.type = mujoco.mjtGeom.mjGEOM_BOX
-    geom.size[0] = 1
-    geom.size[1] = 1
-    geom.size[2] = 1
+    body.add_joint(name='j', type=mujoco.mjtJoint.mjJNT_SLIDE)
+    body.add_geom(size=[1, 1, 1])
+    actuator = spec.add_actuator(
+        target='j', trntype=mujoco.mjtTrn.mjTRN_JOINT
+    )
+    actuator.plugin = plugin
+    actuator.plugin.name = 'instance_name'
+    actuator.plugin.active = True
 
     model = spec.compile()
     self.assertIsNotNone(model)
     self.assertEqual(model.nplugin, 1)
-    self.assertEqual(model.npluginattr, 7)
-    self.assertEqual(model.body_plugin[1], 0)
+    self.assertEqual(model.npluginattr, 8)
+    self.assertEqual(model.actuator_plugin[0], 0)
     attributes = (''.join([chr(i) for i in model.plugin_attr]).split(chr(0)))
-    self.assertEqual(attributes[:2], ['10', '1'])
+    self.assertEqual(attributes[:3], ['10', '', '1'])
 
     copy = spec.copy()  # before assigning the new config
-    wrong_config = {'wrong': '10', 'bend': '1'}
+    wrong_config = {'wrong': '10', 'kd': '1'}
     for s in [spec, copy]:
       s.plugins[0].config = wrong_config
       with self.assertRaisesRegex(
           ValueError, "Error: unrecognized attribute 'plugin:wrong'"
       ):
         s.compile()
+
+  def test_mesh_volumetric_fields(self):
+    """Test that mesh.usernode and mesh.usertet are accessible and modifiable."""
+    spec = mujoco.MjSpec()
+    mesh = spec.add_mesh(name='test_mesh')
+    self.assertTrue(hasattr(mesh, 'usernode'))
+    self.assertTrue(hasattr(mesh, 'usertet'))
+    mesh.usernode = [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0
+    ]
+    mesh.usertet = [0, 1, 2, 3]
+    self.assertLen(mesh.usernode, 12)
+    self.assertLen(mesh.usertet, 4)
+    self.assertEqual(list(mesh.usertet), [0, 1, 2, 3])
 
   def test_geom_and_mesh_plugin(self):
     """Test that geom.plugin and mesh.plugin are accessible."""
@@ -1126,16 +1225,16 @@ class SpecsTest(absltest.TestCase):
     body.name = 'test_body'
 
     plugin = spec.add_plugin(
-        name='test_instance', plugin_name='mujoco.elasticity.cable', active=True
+        name='test_instance', plugin_name='mujoco.sdf.torus', active=True
     )
-    plugin.config = {'twist': '1e2', 'bend': '4e1'}
+    plugin.config = {'radius1': '1', 'radius2': '0.2'}
 
     # Assignment should copy active flag and names
     body.plugin = plugin
 
     self.assertTrue(body.plugin.active)
     self.assertEqual(body.plugin.name, 'test_instance')
-    self.assertEqual(body.plugin.plugin_name, 'mujoco.elasticity.cable')
+    self.assertEqual(body.plugin.plugin_name, 'mujoco.sdf.torus')
 
   def test_access_option_stat_visual(self):
     spec = mujoco.MjSpec.from_string("""
@@ -1223,12 +1322,103 @@ class SpecsTest(absltest.TestCase):
     texture.data = np.zeros((2, 2, 3), dtype=np.uint8).tobytes()
     spec.compile()
 
+  def test_texture_defaults(self):
+    spec = mujoco.MjSpec()
+    main = spec.default
+    self.assertEqual(main.texture.nchannel, 3)
+    flat = spec.add_default('flat', main)
+    flat.texture.type = mujoco.mjtTexture.mjTEXTURE_2D
+    flat.texture.builtin = mujoco.mjtBuiltin.mjBUILTIN_FLAT
+    flat.texture.width = 2
+    flat.texture.height = 3
+
+    # a texture takes the defaults of its class, and overrides them
+    with_class = spec.add_texture(flat, name='with')
+    self.assertEqual(with_class.classname.name, 'flat')
+    self.assertEqual(with_class.builtin, mujoco.mjtBuiltin.mjBUILTIN_FLAT)
+    self.assertEqual(with_class.height, 3)
+    overriding = spec.add_texture(default=flat, name='overriding', height=4)
+    self.assertEqual(overriding.builtin, mujoco.mjtBuiltin.mjBUILTIN_FLAT)
+    self.assertEqual(overriding.height, 4)
+    without = spec.add_texture(name='without')
+    self.assertEqual(without.classname.name, 'main')
+    self.assertEqual(without.builtin, mujoco.mjtBuiltin.mjBUILTIN_NONE)
+    without.type = mujoco.mjtTexture.mjTEXTURE_2D
+    without.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
+    without.width = 4
+    without.height = 4
+
+    model = spec.compile()
+    np.testing.assert_array_equal(model.tex_height, [3, 4, 4])
+    self.assertIn('<default class="flat">', spec.to_xml())
+    self.assertIn('name="with" class="flat"/>', spec.to_xml())
+
+    # the defaults are read from XML
+    xml = textwrap.dedent("""\
+        <mujoco>
+          <default>
+            <default class="flat">
+              <texture type="2d" builtin="flat" width="2" height="3"/>
+            </default>
+          </default>
+          <asset>
+            <texture name="tex" class="flat"/>
+          </asset>
+        </mujoco>
+    """)
+    spec = mujoco.MjSpec.from_string(xml)
+    self.assertEqual(spec.find_default('flat').texture.width, 2)
+    self.assertEqual(spec.texture('tex').height, 3)
+
   def test_read_texture(self):
     spec = mujoco.MjSpec()
     texture = spec.add_texture(name='texture', height=1, width=2, nchannel=3)
     texture.data = bytes([1, 2, 3, 4, 5, 6])
     read_bytes = texture.data
     self.assertEqual(read_bytes, bytes([1, 2, 3, 4, 5, 6]))
+
+  def test_texture_by_reference(self):
+    # a file texture under the passthrough policy has no pixels in the model
+    png = os.path.join(self.create_tempdir().full_path, 'tiny.png')
+    with open(png, 'wb') as f:
+      f.write(_TINY_PNG)
+    xml = textwrap.dedent(f"""\
+        <mujoco>
+          <compiler passthrough="textures"/>
+          <asset>
+            <texture name="byref" type="2d" file="{png}"/>
+            <texture name="kept" type="2d" file="{png}" embed="true"/>
+          </asset>
+        </mujoco>
+    """)
+    spec = mujoco.MjSpec.from_string(xml)
+    self.assertEqual(
+        spec.compiler.passthrough, mujoco.mjtPassthrough.mjPASSTHROUGH_TEXTURES
+    )
+    self.assertEqual(spec.texture('byref').embed, mujoco.mjtEmbed.mjEMBED_AUTO)
+    self.assertEqual(spec.texture('kept').embed, mujoco.mjtEmbed.mjEMBED_TRUE)
+    model = spec.compile()
+    byref = model.texture('byref')
+    self.assertEqual(byref.adr[0], -1)
+    self.assertEqual(byref.width[0], 0)
+    self.assertEqual(byref.height[0], 0)
+    self.assertEqual(byref.data.size, 0)
+    self.assertEqual(byref.colorspace[0], mujoco.mjtColorSpace.mjCOLORSPACE_AUTO)
+    self.assertEqual(byref.contenttypeadr[0], -1)
+    path = model.paths[byref.pathadr[0] :].split(b'\0')[0]
+    # mujoco joins with '/', os.path with the platform separator
+    self.assertEqual(os.path.normpath(path.decode()), os.path.normpath(png))
+    kept = model.texture('kept')
+    self.assertGreaterEqual(kept.adr[0], 0)
+    self.assertEqual(kept.data.shape, (2, 3, 3))
+    self.assertEqual(model.ntexdata, kept.data.size)
+    self.assertIn('passthrough="textures"', spec.to_xml())
+
+    # the policy is a spec field; recompiling without it loads the pixels
+    spec.compiler.passthrough = mujoco.mjtPassthrough.mjPASSTHROUGH_NONE
+    model = spec.compile()
+    self.assertGreaterEqual(model.texture('byref').adr[0], 0)
+    self.assertNotIn('passthrough', spec.to_xml())
 
   def test_modify_texture(self):
     # Assign red, green and blue pixels, then make the first pixel yellow.
@@ -1248,18 +1438,222 @@ class SpecsTest(absltest.TestCase):
     with self.assertRaises(ValueError):
       data_array[0] = -1
 
-  def test_find_unnamed_asset(self):
+  def test_fuse_static(self):
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <worldbody>
+            <body name="moving">
+              <joint/>
+              <geom name="moving" size=".1"/>
+              <body name="static" pos="1 0 0">
+                <geom name="static" size=".1"/>
+              </body>
+            </body>
+          </worldbody>
+        </mujoco>
+    """))
+    self.assertEqual(spec.compile().nbody, 3)
+
+    self.assertEqual(spec.fuse_static(), 1)
+    self.assertIsNone(spec.body('static'))
+    self.assertEqual(spec.geom('static').frame.pos[0], 1)
+    self.assertEqual(spec.geom('static').parent, spec.body('moving'))
+    model = spec.compile()
+    self.assertEqual(model.nbody, 2)
+    np.testing.assert_allclose(model.geom('static').pos, [1, 0, 0])
+
+    # a body whose fuse attribute is false is kept
+    kept = spec.body('moving').add_body(name='kept')
+    kept.add_geom(size=[0.1, 0, 0])
+    kept.fuse = False
+    self.assertEqual(spec.fuse_static(), 0)
+    self.assertIsNotNone(spec.body('kept'))
+    kept.fuse = True
+    self.assertEqual(spec.fuse_static(), 1)
+    self.assertIsNone(spec.body('kept'))
+
+  def test_discard_visual(self):
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <asset>
+            <material name="mat"/>
+          </asset>
+          <worldbody>
+            <body name="body">
+              <joint/>
+              <geom name="collision" size=".1" material="mat"/>
+              <geom name="visual" size=".2" contype="0" conaffinity="0"/>
+            </body>
+          </worldbody>
+        </mujoco>
+    """))
+    mass = spec.compile().body('body').mass
+
+    self.assertEqual(spec.discard_visual(), 2)
+    self.assertIsNone(spec.geom('visual'))
+    self.assertIsNone(spec.material('mat'))
+    self.assertEqual(spec.geom('collision').material, '')
+    model = spec.compile()
+    self.assertEqual(model.ngeom, 1)
+    self.assertEqual(model.nmat, 0)
+    np.testing.assert_allclose(model.body('body').mass, mass)
+    self.assertEqual(spec.discard_visual(), 0)
+
+    # inertia inferred from a discarded geom cannot be kept under 'true'
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <compiler inertiafromgeom="true"/>
+          <worldbody>
+            <body>
+              <joint/>
+              <geom size=".1"/>
+              <geom name="visual" size=".2" contype="0" conaffinity="0"/>
+            </body>
+          </worldbody>
+        </mujoco>
+    """))
+    with self.assertRaisesRegex(ValueError, 'inertiafromgeom'):
+      spec.discard_visual()
+    self.assertIsNotNone(spec.geom('visual'))
+
+  def test_dedup_assets(self):
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <asset>
+            <texture name="tex1" type="2d" builtin="checker" width="8" height="8"/>
+            <texture name="tex2" type="2d" builtin="checker" width="8" height="8"/>
+            <texture name="tex3" type="2d" builtin="checker" width="8" height="16"/>
+            <material name="mat1" texture="tex1"/>
+            <material name="mat2" texture="tex2"/>
+            <material name="mat3" texture="tex3"/>
+            <mesh name="mesh1" vertex="0 0 0  1 0 0  0 1 0  0 0 1"/>
+            <mesh name="mesh2" vertex="0 0 0  1 0 0  0 1 0  0 0 1"/>
+            <mesh name="mesh3" vertex="0 0 0  1 0 0  0 1 0  0 0 1" scale="2 2 2"/>
+          </asset>
+          <worldbody>
+            <geom type="mesh" mesh="mesh1" material="mat1"/>
+            <geom type="mesh" mesh="mesh2" material="mat2"/>
+            <geom type="mesh" mesh="mesh3" material="mat3"/>
+          </worldbody>
+        </mujoco>
+    """))
+    self.assertEqual(spec.dedup_assets(), 2)
+    self.assertIsNotNone(spec.texture('tex1'))
+    self.assertIsNone(spec.texture('tex2'))
+    self.assertIsNotNone(spec.texture('tex3'))
+    self.assertIsNotNone(spec.mesh('mesh1'))
+    self.assertIsNone(spec.mesh('mesh2'))
+    self.assertIsNotNone(spec.mesh('mesh3'))
+    self.assertEqual(spec.material('mat2').textures[mujoco.mjtTextureRole.mjTEXROLE_RGB], 'tex1')
+    self.assertEqual(spec.geoms[1].meshname, 'mesh1')
+    self.assertEqual(spec.dedup_assets(), 0)
+    model = spec.compile()
+    self.assertEqual(model.ntex, 2)
+    self.assertEqual(model.nmesh, 2)
+    self.assertEqual(model.geom_dataid[0], model.geom_dataid[1])
+    self.assertEqual(
+        model.mat_texid[0, mujoco.mjtTextureRole.mjTEXROLE_RGB],
+        model.mat_texid[1, mujoco.mjtTextureRole.mjTEXROLE_RGB],
+    )
+
+  def test_dedup_assets_of_attached_spec_error(self):
+    parent = mujoco.MjSpec()
+    child = mujoco.MjSpec()
+    child.worldbody.add_body(name='child_body')
+    frame = parent.worldbody.add_frame()
+    parent.attach(child, frame=frame, prefix='child_')
+    with self.assertRaisesRegex(
+        ValueError, 'Cannot merge the assets of an attached mjSpec.'
+    ):
+      child.dedup_assets()
+
+  def test_adopt_inertial(self):
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <worldbody>
+            <body name="body">
+              <joint/>
+              <geom name="geom" size=".1" pos="0 0 .2"/>
+            </body>
+          </worldbody>
+        </mujoco>
+    """))
+    body = spec.body('body')
+    model = spec.compile()
+    mass = model.body('body').mass[0]
+    self.assertFalse(body.explicitinertial)
+
+    spec.adopt_inertial(body)
+    self.assertTrue(body.explicitinertial)
+    self.assertAlmostEqual(body.mass, mass)
+    np.testing.assert_allclose(body.ipos, [0, 0, 0.2])
+
+    # The adopted inertial no longer follows the geom.
+    spec.geom('geom').size[0] = 0.2
+    self.assertAlmostEqual(spec.compile().body('body').mass[0], mass)
+
+    spec.compiler.inertiafromgeom = mujoco.mjtInertiaFromGeom.mjINERTIAFROMGEOM_TRUE
+    with self.assertRaisesRegex(ValueError, 'inertiafromgeom'):
+      spec.adopt_inertial(body)
+
+  def test_copy_back(self):
+    spec = mujoco.MjSpec.from_string(textwrap.dedent("""\
+        <mujoco>
+          <worldbody>
+            <frame pos="1 0 0">
+              <body name="body" pos="1 0 0">
+                <joint name="joint" range="-90 90"/>
+                <geom name="geom" size="1"/>
+              </body>
+            </frame>
+          </worldbody>
+        </mujoco>
+    """))
+    model = spec.compile()
+    model.body('body').pos[0] = 4
+    model.geom('geom').size[0] = 2
+    model.joint('joint').range[1] /= 2
+    spec.copy_back(model)
+
+    # Each value is written as what compiles to it: the position in the frame
+    # of the body, the limit in degrees.
+    np.testing.assert_array_equal(spec.body('body').pos, [3, 0, 0])
+    self.assertEqual(spec.geom('geom').size[0], 2)
+    np.testing.assert_allclose(spec.joint('joint').range, [-90, 45])
+    recompiled = spec.compile()
+    np.testing.assert_array_equal(recompiled.body('body').pos, [4, 0, 0])
+    np.testing.assert_array_equal(recompiled.geom('geom').size, [2, 0, 0])
+
+    # A change which the spec cannot express is an error, and nothing is
+    # written.
+    spec.compiler.inertiafromgeom = mujoco.mjtInertiaFromGeom.mjINERTIAFROMGEOM_TRUE
+    model = spec.compile()
+    model.body('body').mass[0] = 5
+    model.geom('geom').size[0] = 3
+    with self.assertRaisesRegex(ValueError, 'was changed in the model'):
+      spec.copy_back(model)
+    self.assertEqual(spec.geom('geom').size[0], 2)
+
+  def test_asset_not_named_after_file(self):
     spec = mujoco.MjSpec()
     texture_file = spec.add_texture(file='file.png')
     texture_name = spec.add_texture(name='name')
     mesh_file = spec.add_mesh(file='file.obj')
     mesh_name = spec.add_mesh(name='mesh')
-    self.assertEqual(spec.texture('file'), texture_file)
     self.assertEqual(spec.texture('name'), texture_name)
-    self.assertEqual(spec.mesh('file'), mesh_file)
     self.assertEqual(spec.mesh('mesh'), mesh_name)
     self.assertIsNone(spec.texture('none'))
     self.assertIsNone(spec.mesh('none'))
+
+    # Only the XML parser names an asset after its file.
+    self.assertEqual(texture_file.name, '')
+    self.assertEqual(mesh_file.name, '')
+    self.assertIsNone(spec.texture('file'))
+    self.assertIsNone(spec.mesh('file'))
+    parsed = mujoco.MjSpec.from_string(
+        '<mujoco><asset><mesh file="file.obj"/></asset></mujoco>'
+    )
+    self.assertEqual(parsed.meshes[0].name, 'file')
 
   def test_texture_gridlayout(self):
     spec = mujoco.MjSpec()
@@ -1467,6 +1861,45 @@ class SpecsTest(absltest.TestCase):
     child4 = mujoco.MjSpec()
     with self.assertRaisesRegex(ValueError, 'Frame not found.'):
       parent.attach(child4, frame='invalid_frame', prefix='child3-')
+
+  def test_attach_asset_conflict_exception_safety(self):
+    parent = mujoco.MjSpec()
+    parent.worldbody.add_body(name='parent_body').add_geom(size=[0.2, 0, 0])
+    frame = parent.worldbody.add_frame(name='mount', pos=[1, 0, 0])
+    site = parent.worldbody.add_site(name='mount_site', pos=[0, 1, 0])
+    parent.assets = {'child_shared_s.obj': b'parent'}
+    parent.override_assets = False
+
+    model_before = parent.compile()
+    xml_before = parent.to_xml()
+    bodies_before = [b.name for b in parent.bodies]
+
+    child = mujoco.MjSpec()
+    child.assets = {
+        'unique.obj': b'child_unique',
+        'shared.obj': b'child_shared',
+    }
+    child.worldbody.add_body(name='part').add_geom(size=[0.1, 0, 0])
+
+    with self.assertRaisesRegex(
+        ValueError, r'Asset shared\.obj already exists in parent spec\.'
+    ):
+      parent.attach(child, prefix='child_', suffix='_s', frame=frame)
+
+    with self.assertRaisesRegex(
+        ValueError, r'Asset shared\.obj already exists in parent spec\.'
+    ):
+      parent.attach(child, prefix='child_', suffix='_s', site=site)
+
+    self.assertEqual([b.name for b in parent.bodies], bodies_before)
+    self.assertEqual(dict(parent.assets), {'child_shared_s.obj': b'parent'})
+    self.assertIsNone(child.parent)
+    self.assertEqual(parent.to_xml(), xml_before)
+
+    model_after = parent.compile()
+    self.assertEqual(model_after.nbody, model_before.nbody)
+    self.assertEqual(model_after.ngeom, model_before.ngeom)
+    np.testing.assert_array_equal(model_after.body_pos, model_before.body_pos)
 
   def test_delete_from_attached_spec_error(self):
     parent = mujoco.MjSpec()
@@ -2207,6 +2640,36 @@ class SpecsTest(absltest.TestCase):
     model = spec.compile()
     self.assertIsNotNone(model)
 
+  def test_make_flex_mesh(self):
+    # Create a spec with flexcomp consuming a mesh asset.
+    spec = mujoco.MjSpec()
+    mesh = spec.add_mesh(name='test_mesh')
+    mesh.usernode = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    mesh.usertet = [0, 1, 2, 3]
+    mesh.uservert = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    mesh.userface = [0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3]
+    body = spec.worldbody.add_body(name='flex_body')
+    flex = body.make_flex(
+        name='mesh_flex',
+        mesh='test_mesh',
+    )
+    self.assertIsNotNone(flex)
+    model = spec.compile()
+    self.assertIsNotNone(model)
+    self.assertEqual(model.nflex, 1)
+    self.assertEqual(model.flex_dim[0], 3)
+
+  def test_make_flex_mesh_errors(self):
+    spec = mujoco.MjSpec()
+    spec.add_mesh(name='test_mesh').make_grid(
+        count=[3, 3, 1], spacing=[0.1, 0.1, 0], dim=2
+    )
+    body = spec.worldbody.add_body(name='flex_body')
+    with self.assertRaisesRegex(ValueError, "mesh 'tset_mesh' not found"):
+      body.make_flex(name='typo', mesh='tset_mesh')
+    with self.assertRaisesRegex(ValueError, "both 'file' and 'mesh'"):
+      body.make_flex(name='both', mesh='test_mesh', file='test_mesh.obj')
+
   def test_authored_struct(self):
     spec = mujoco.MjSpec()
     # authored struct should be accessible with correct fields
@@ -2479,6 +2942,187 @@ class SpecsTest(absltest.TestCase):
     model = spec.compile()
     self.assertEqual(geom.signature, model.signature)
     self.assertEqual(model.bind(geom).id, 1)
+
+  def test_attach_empty_prefix_warning(self):
+    parent = mujoco.MjSpec()
+    child = mujoco.MjSpec()
+    child.worldbody.add_body(name='b').add_geom(size=[1, 0, 0])
+    frame = parent.worldbody.add_frame()
+    parent.attach(child, frame=frame, prefix='')
+    with self.assertWarnsRegex(
+        UserWarning, 'may prevent the model from being saved correctly'
+    ):
+      parent.compile()
+
+  def test_flex_multi_material(self):
+    spec = mujoco.MjSpec.from_string("""
+      <mujoco>
+        <asset>
+          <material name="mat0" rgba="1 0 0 1"/>
+          <material name="mat1" rgba="0 1 0 1"/>
+        </asset>
+        <worldbody>
+          <flexcomp name="f" type="grid" dim="2" count="2 2 1" spacing="0.1 0.1 0.1"
+                    material="mat0"/>
+        </worldbody>
+      </mujoco>
+    """)
+    flex = spec.flexes[0]
+    self.assertEqual(list(flex.material), ['mat0'])
+
+    # Single string assignment works for backward compatibility.
+    flex.material = 'mat1'
+    self.assertEqual(list(flex.material), ['mat1'])
+    model = spec.compile()
+    mat0_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, 'mat0')
+    mat1_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, 'mat1')
+    np.testing.assert_array_equal(model.flex_matid, [mat1_id, mat1_id])
+
+    # Sequence of strings assigns per-element materials.
+    flex.material = ['mat0', 'mat1']
+    self.assertEqual(list(flex.material), ['mat0', 'mat1'])
+    model = spec.compile()
+    np.testing.assert_array_equal(model.flex_matid, [mat0_id, mat1_id])
+
+    # Empty string clears material list.
+    flex.material = ''
+    self.assertEqual(list(flex.material), [])
+    model = spec.compile()
+    np.testing.assert_array_equal(model.flex_matid, [-1, -1])
+
+  def test_char_array_bounds_check(self):
+    spec = mujoco.MjSpec()
+    spec.compiler.eulerseq = 'zyx'
+    self.assertEqual(''.join(spec.compiler.eulerseq), 'zyx')
+
+    with self.assertRaisesRegex(
+        ValueError, 'eulerseq may have at most 3 characters'
+    ):
+      spec.compiler.eulerseq = 'xyzw'
+    self.assertEqual(''.join(spec.compiler.eulerseq), 'zyx')
+
+    with self.assertRaisesRegex(
+        ValueError, 'eulerseq may have at most 3 characters'
+    ):
+      spec.compiler.eulerseq = ['x', 'y', 'z', 'w']
+    self.assertEqual(''.join(spec.compiler.eulerseq), 'zyx')
+
+    tex = spec.add_texture(name='sky', type=mujoco.mjtTexture.mjTEXTURE_SKYBOX)
+    tex.gridlayout = '.U..LFRB.D..'
+    self.assertEqual(''.join(tex.gridlayout), '.U..LFRB.D..')
+
+    with self.assertRaisesRegex(
+        ValueError, 'gridlayout may have at most 12 characters'
+    ):
+      tex.gridlayout = '.' * 13
+    self.assertEqual(''.join(tex.gridlayout), '.U..LFRB.D..')
+
+    tex.gridsize = [2, 4]
+    tex.gridlayout = 'LFRB.D..'
+    self.assertEqual(list(tex.gridlayout)[:8], list('LFRB.D..'))
+    self.assertEqual(list(tex.gridlayout)[8:], ['\x00'] * 4)
+
+  def test_recompile_with_assets_and_vfs(self):
+    cube_obj = textwrap.dedent("""\
+        v -1 -1 -1
+        v  1 -1 -1
+        v  1  1 -1
+        v -1  1 -1
+        v -1 -1  1
+        v  1 -1  1
+        v  1  1  1
+        v -1  1  1
+        f 1 2 3 4
+        f 5 8 7 6
+        f 1 5 6 2
+        f 2 6 7 3
+        f 3 7 8 4
+        f 4 8 5 1
+    """).encode('utf-8')
+    xml = """
+      <mujoco>
+        <asset>
+          <mesh name="box" file="box.obj"/>
+        </asset>
+        <worldbody>
+          <body name="b">
+            <joint name="j" type="hinge"/>
+            <geom type="mesh" mesh="box"/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """
+
+    # Recompile using in-memory spec.assets.
+    spec_assets = mujoco.MjSpec.from_string(xml, assets={'box.obj': cube_obj})
+    m1 = spec_assets.compile()
+    d1 = mujoco.MjData(m1)
+    d1.qpos[0] = 0.42
+    spec_assets.worldbody.add_body(name='extra').add_geom(size=[0.1, 0, 0])
+    m2, d2 = spec_assets.recompile(m1, d1)
+    self.assertEqual(m2.ngeom, 2)
+    self.assertAlmostEqual(d2.qpos[0], 0.42)
+
+    # Recompile using explicit MjVfs.
+    with mujoco.MjVfs() as vfs:
+      vfs['box.obj'] = cube_obj
+      spec_vfs = mujoco.MjSpec.from_string(xml)
+      m3 = spec_vfs.compile(vfs=vfs)
+      d3 = mujoco.MjData(m3)
+      d3.qpos[0] = 0.75
+      spec_vfs.worldbody.add_body(name='extra').add_geom(size=[0.1, 0, 0])
+      m4, d4 = spec_vfs.recompile(m3, d3, vfs=vfs)
+      self.assertEqual(m4.ngeom, 2)
+      self.assertAlmostEqual(d4.qpos[0], 0.75)
+
+      with self.assertRaises(ValueError):
+        spec_assets.recompile(m2, d2, vfs=vfs)
+
+    closed_vfs = mujoco.MjVfs()
+    closed_vfs.close()
+    with self.assertRaises(RuntimeError):
+      spec_vfs.recompile(m4, d4, vfs=closed_vfs)
+
+  def test_bind_sequence_setattr_and_scalar_str_getattr(self):
+    spec = mujoco.MjSpec.from_string("""
+      <mujoco>
+        <worldbody>
+          <body name="b1">
+            <joint name="box" type="hinge" damping="0.1"/>
+            <geom size="0.1"/>
+          </body>
+          <body name="b2">
+            <joint name="sphere" type="hinge" damping="0.2"/>
+            <geom size="0.1"/>
+          </body>
+        </worldbody>
+      </mujoco>
+    """)
+    joints = [spec.joint('box'), spec.joint('sphere')]
+    model = spec.compile()
+    data = mujoco.MjData(model)
+
+    self.assertEqual(model.bind(joints).id, [0, 1])
+    self.assertEqual(data.bind(joints).id, [0, 1])
+    self.assertEqual(model.bind(joints).name, ['box', 'sphere'])
+    self.assertEqual(data.bind(joints).name, ['box', 'sphere'])
+
+    model.bind(joints).damping = [0.5, 1.5]
+    np.testing.assert_allclose(model.bind(joints).damping, [0.5, 1.5])
+    np.testing.assert_allclose(model.dof_damping, [0.5, 1.5])
+
+  def test_closed_vfs_raises(self):
+    vfs = mujoco.MjVfs()
+    vfs.close()
+    with self.assertRaisesWithLiteralMatch(RuntimeError, "VFS is closed"):
+      mujoco.MjSpec.from_string("<mujoco/>", vfs=vfs)
+    spec = mujoco.MjSpec.from_string("<mujoco/>")
+    with self.assertRaisesWithLiteralMatch(RuntimeError, "VFS is closed"):
+      spec.compile(vfs=vfs)
+    with self.assertRaisesWithLiteralMatch(RuntimeError, "VFS is closed"):
+      spec.fuse_static(vfs=vfs)
+    with self.assertRaisesWithLiteralMatch(RuntimeError, "VFS is closed"):
+      spec.discard_visual(vfs=vfs)
 
 
 if __name__ == '__main__':

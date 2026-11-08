@@ -33,6 +33,8 @@ void mjCopyError(char* dst, const char* src, int maxlen);
 
 using tinyxml2::XMLElement;
 
+static constexpr int kDefaultUnauthoredValue = -12345;
+
 XMLElement* FirstChildElement(XMLElement* e, const char* name = nullptr);
 XMLElement* NextSiblingElement(XMLElement* e, const char* name = nullptr);
 
@@ -208,8 +210,9 @@ class mjXUtil {
                           int*                  data,
                           bool                  required = false);
 
-  // write vector<float> to string
-  static void Vector2String(std::string& txt, const std::vector<float>& vec, int ncol = 0);
+  // write vector of numbers to string, as WriteAttr writes them
+  template <typename T>
+  static void Vector2String(std::string& txt, const std::vector<T>& vec, int ncol = 0);
 
 
   // find subelement with given name, make sure it is unique
@@ -273,7 +276,7 @@ class mjXUtil {
   static void WriteAttrInt(tinyxml2::XMLElement* elem,
                            std::string           name,
                            int                   data,
-                           int                   def = -12345);
+                           int                   def = kDefaultUnauthoredValue);
 
   // write attribute- keyword
   static void WriteAttrKey(tinyxml2::XMLElement* elem,
@@ -281,7 +284,7 @@ class mjXUtil {
                            const mjMap*          map,
                            int                   mapsz,
                            int                   data,
-                           int                   def = -12345);
+                           int                   def = kDefaultUnauthoredValue);
 
   // write attribute- space-separated keywords
   static void WriteAttrKeys(XMLElement*  elem,
@@ -290,7 +293,7 @@ class mjXUtil {
                             int          mapsz,
                             int*         data,
                             int          ndata,
-                            int          def = -12345);
+                            int          def = kDefaultUnauthoredValue);
 
  private:
   template <typename T>

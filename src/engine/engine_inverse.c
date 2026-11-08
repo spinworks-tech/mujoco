@@ -28,6 +28,7 @@
 #include "engine/engine_memory.h"
 #include "engine/engine_macro.h"
 #include "engine/engine_forward.h"
+#include "engine/engine_metric.h"
 #include "engine/engine_sensor.h"
 #include "engine/engine_support.h"
 #include "engine/engine_util_blas.h"
@@ -71,7 +72,7 @@ void mj_invPosition(const mjModel* m, mjData* d) {
   TM_ADD(mjTIMER_POS_KINEMATICS);
 
   // implicit effective metric: multiply-only build (no factorization) for the inverse
-  mjd_effBuild(m, d, mj_isMetric(m), /*flg_factor=*/0);
+  mj_effBuild(m, d, mj_isMetric(m), /*flg_factor=*/0);
 
   TM_END1(mjTIMER_POSITION);
 }
@@ -110,7 +111,7 @@ static void mj_discreteAcc(const mjModel* m, mjData* d) {
   case mjINT_EULER:
     // check for dof damping if disable flag is not set
     dof_damping = 0;
-    if (!mjDISABLED(mjDSBL_EULERDAMP)) {
+    if (!mjDISABLED(mjDSBL_EULERDAMP) && !mjDISABLED(mjDSBL_DAMPER)) {
       for (int i=0; i < nv; i++) {
         if (m->dof_damping[i] > 0 ||
             !mju_isZero(m->dof_dampingpoly + mjNPOLY*i, mjNPOLY) ||
@@ -144,14 +145,15 @@ static void mj_discreteAcc(const mjModel* m, mjData* d) {
     // compute qDeriv
     mjd_smooth_vel(m, d, /* flg_bias = */ 1);
 
-    // gather qLU <- M (lower to full)
-    mju_gatherMasked(d->qLU, d->M, m->mapM2D, nD);
+    // gather qLU <- M (lower to full), in scratch: d->qLU holds the forward factorization
+    mjtNum* qLU = mjSTACKALLOC(d, nD, mjtNum);
+    mju_gatherMasked(qLU, d->M, m->mapM2D, nD);
 
     // set qLU = M - dt*qDeriv
-    mju_addToScl(d->qLU, d->qDeriv, -m->opt.timestep, m->nD);
+    mju_addToScl(qLU, d->qDeriv, -m->opt.timestep, m->nD);
 
     // set qfrc = qLU * qacc
-    mju_mulMatVecSparse(qfrc, d->qLU, qacc, nv,
+    mju_mulMatVecSparse(qfrc, qLU, qacc, nv,
                         m->D_rownnz, m->D_rowadr, m->D_colind, /*rowsuper=*/NULL);
     break;
 
@@ -159,18 +161,16 @@ static void mj_discreteAcc(const mjModel* m, mjData* d) {
     // compute analytical derivative qDeriv; skip rne derivative
     mjd_smooth_vel(m, d, /* flg_bias = */ 0);
 
-    // save mass matrix
-    mjtNum* Msave = mjSTACKALLOC(d, m->nC, mjtNum);
-    mju_copy(Msave, d->M, m->nC);
-
-    // modified mass matrix: gather qH <- qDeriv (full to lower)
-    mju_gather(d->qH, d->qDeriv, m->mapD2M, nC);
+    // modified mass matrix: gather qH <- qDeriv (full to lower), in scratch: d->qH holds the
+    // forward factorization
+    mjtNum* qH = mjSTACKALLOC(d, nC, mjtNum);
+    mju_gather(qH, d->qDeriv, m->mapD2M, nC);
 
     // set qH = M - dt*qDeriv
-    mju_addScl(d->qH, d->M, d->qH, -m->opt.timestep, nC);
+    mju_addScl(qH, d->M, qH, -m->opt.timestep, nC);
 
     // set qfrc = (M - dt*qDeriv) * qacc
-    mju_mulSymVecSparse(qfrc, d->qH, qacc, m->nv, m->M_rownnz, m->M_rowadr, m->M_colind);
+    mju_mulSymVecSparse(qfrc, qH, qacc, m->nv, m->M_rownnz, m->M_rowadr, m->M_colind);
 
     // standalone free bodies: overwrite block rows with the unsymmetric local product,
     // including the bias (gyroscopic) derivative, mirroring mj_implicitSkip
@@ -192,7 +192,7 @@ static void mj_discreteAcc(const mjModel* m, mjData* d) {
   mj_freeStack(d);
 
   // refresh the metric's velocity-stage values
-  mjd_effShift(m, d);
+  mj_effShift(m, d);
 }
 
 
@@ -256,8 +256,10 @@ void mj_inverseSkip(const mjModel* m, mjData* d,
     }
   }
 
-  // actuation-stage metric refresh: reads ctrl/act from mjData without running actuation
-  mjd_effActuation(m, d);
+  // actuation-stage metric refresh: reads ctrl/act from mjData without running actuation.
+  // The inverse only multiplies by the metric: the backbone factor is needed only by the
+  // exact constraint diagonal
+  mj_effActuation(m, d, /*flg_factor=*/mjENABLED(mjENBL_DIAGEXACT));
   if (mj_isMetric(m)) {
     mj_regularizeConstraint(m, d, /*flg_AR=*/0);
     mj_referenceConstraint(m, d);
@@ -291,7 +293,7 @@ void mj_inverseSkip(const mjModel* m, mjData* d,
   // implicit effective metric (built in mj_invPosition): the forward dynamics solved
   // (M+K)*qacc = qfrc + c + J'*f, so the discrete-consistent inverse adds K*qacc - c
   if (d->efm_active) {
-    mjd_effMulAdd(m, d, Ma, d->qacc, /*flg_contact=*/1);
+    mj_effMulAdd(m, d, Ma, d->qacc, /*flg_contact=*/1);
 
     // decoupled standalone free bodies took the local gyroscopic solve in the forward
     // pass (mj_discreteGyro): mirror it, overwriting their rows with the local product
@@ -302,7 +304,6 @@ void mj_inverseSkip(const mjModel* m, mjData* d,
         continue;
       }
       int adr = m->jnt_dofadr[j];
-      // TODO(tassa): engine_metric refactor: add a hand-unrolled mji_mulMatVec6
       mju_mulMatVec(Ma+adr, A, d->qacc+adr, 6, 6);
     }
 

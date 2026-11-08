@@ -518,7 +518,7 @@ def ray_hfield(
   # check top box: done if no intersection
   top_intersect, all, normal_top = ray_box(top_pos, mat, top_size, pnt, vec)
 
-  if top_intersect < 0.0:
+  if top_intersect < 0.0 or nrow < 2 or ncol < 2:
     return x, normal_base
 
   # map to local frame
@@ -911,7 +911,7 @@ def _ray_geom_mesh(
     return -1.0, wp.vec3()
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def _ray(
   # Model:
   ngeom: int,

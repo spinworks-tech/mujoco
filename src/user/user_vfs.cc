@@ -15,9 +15,6 @@
 #include "user/user_vfs.h"
 
 #include <sys/stat.h>
-#if defined(_WIN32) && !defined(__MINGW32__)
-  #define stat _stat
-#endif
 
 #include <algorithm>
 #include <cctype>
@@ -37,6 +34,7 @@
 
 #include <mujoco/mjplugin.h>
 #include <mujoco/mujoco.h>
+#include "engine/engine_util_errmem.h"
 #include "engine/engine_util_misc.h"
 #include "user/user_util.h"
 
@@ -51,7 +49,7 @@ struct ResourceFileData {
 
 int OpenFile(const char* filename, mjResource* resource) {
   struct stat file_stat;
-  if (stat(filename, &file_stat) == 0) {
+  if (mju_stat(filename, &file_stat) == 0) {
     ResourceFileData* data = new ResourceFileData();
     resource->data         = data;
 
@@ -105,7 +103,7 @@ namespace mujoco::user {
 
 VFS::VFS(mjVFS* vfs) {
   wrapped_vfs_.impl_ = this;
-  mjp_defaultResourceProvider(&default_provider_);
+  mjp_defaultProvider(&default_provider_);
   default_provider_.open = [](mjResource* res) { return OpenFile(res->name, res); };
   default_provider_.read = [](mjResource* res, const void** buffer) {
     return ReadFile(res->name, res, buffer);
@@ -115,7 +113,7 @@ VFS::VFS(mjVFS* vfs) {
     return FileModified(res, time);
   };
   default_provider_.write = [](mjResource* res, const void* buffer, mjtSize nbytes) -> mjtSize {
-    FILE* fp = fopen(res->name, "wb");
+    FILE* fp = mju_fopen(res->name, "wb");
     if (!fp) { return -1; }
     mjtSize written = static_cast<mjtSize>(fwrite(buffer, 1, nbytes, fp));
     fclose(fp);
@@ -201,17 +199,14 @@ mjResource* VFS::Open(const char* dir, const char* name, char* error, size_t ner
 }
 
 VFS::Status VFS::Mount(const FilePath& path, const mjpResourceProvider* provider) {
-  if (!provider) { return kInvalidResourceProvider; }
-  {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (mounts_.contains(path.Str())) { return kRepeatedName; }
-  }
-
-  ResourcePtr res = CreateResource(path.c_str(), provider);
-  provider->mount(res.get());
-
+  if (!provider) { return kInvalidProvider; }
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (mounts_.contains(path.Str())) { return kRepeatedName; }
+
+  ResourcePtr res     = CreateResource(path.c_str(), provider);
+  mjResource* res_ptr = res.get();
   mounts_.emplace(path.Str(), std::move(res));
+  if (provider->mount) { provider->mount(res_ptr); }
   return kSuccess;
 }
 
@@ -253,7 +248,7 @@ VFS::Status VFS::Unmount(const FilePath& path) {
     mounts_.erase(it);
     return kSuccess;
   }
-  return kInvalidResourceProvider;
+  return kInvalidProvider;
 }
 
 bool VFS::ContainsBuffer(const char* name) {
@@ -268,6 +263,14 @@ bool VFS::ContainsFile(const char* directory, const char* filename) {
   std::string                           key = path.StripPath().Lower().Str();
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   return mounts_.contains(key);
+}
+
+bool VFS::InMemory(const char* dir, const char* name) {
+  if (name == nullptr) { return false; }
+  const std::string path = FilePath(dir ? dir : "", name).Str();
+  if (mjp_findProvider(path.c_str())) { return false; }
+  const mjResource* mount = FindMount(path);
+  return mount && mount != &default_mount_;
 }
 
 int VFS::Read(mjResource* resource, const void** buffer) {
@@ -325,7 +328,7 @@ mjResource* VFS::FindMount(const std::string& fullpath) {
       if (auto it = archive_mounts_.find(str); it != archive_mounts_.end()) {
         return it->second.get();
       }
-      const mjpResourceProvider* archive_prov = mjp_findArchiveResourceProvider(str.c_str());
+      const mjpResourceProvider* archive_prov = mjp_findArchiveProvider(str.c_str());
       if (archive_prov) {
         ResourcePtr res = CreateResource(str, archive_prov);
         if (archive_prov->mount(res.get())) {
@@ -348,7 +351,7 @@ mjResource* VFS::FindMount(const std::string& fullpath) {
     }
   }
 
-  const mjpResourceProvider* provider = mjp_getResourceProvider(fullpath.c_str());
+  const mjpResourceProvider* provider = mjp_findProvider(fullpath.c_str());
   if (provider) {
     if (auto it = mounts_.find(provider->prefix); it != mounts_.end()) { return it->second.get(); }
 
@@ -471,7 +474,7 @@ class BufferProvider : public mjpResourceProvider {
     };
     provider->modified = [](const mjResource* res, const char* timestamp) {
       const BufferProvider* self = (const BufferProvider*)res->provider;
-      if (mju_isValidBase64(timestamp) > sizeof(std::uint64_t)) { return 1; }
+      if (mju_isValidBase64(timestamp) != sizeof(std::uint64_t)) { return 1; }
       std::uint64_t test = 0;
       mju_decodeBase64((std::uint8_t*)&test, timestamp);
       if (self->hash_ != test) { return 1; }
@@ -485,7 +488,7 @@ class BufferProvider : public mjpResourceProvider {
 
  private:
   BufferProvider(const char* dir, const char* filename) {
-    mjp_defaultResourceProvider(this);
+    mjp_defaultProvider(this);
 
     mujoco::user::FilePath file_path(dir ? dir : "", filename);
     path_     = file_path.StripPath().Lower();
@@ -495,13 +498,13 @@ class BufferProvider : public mjpResourceProvider {
 
     hash_ = contents_.empty() ? 0 : 0xcbf29ce484222325;
     for (const std::uint8_t& byte : contents_) {
-      hash_ |= byte;
+      hash_ ^= byte;
       hash_ *= prime;
     }
   }
 
   BufferProvider(const char* name, const void* src, size_t n) {
-    mjp_defaultResourceProvider(this);
+    mjp_defaultProvider(this);
     path_ = mujoco::user::FilePath(name);
 
     static constexpr std::uint64_t prime = 0x100000001b3;
@@ -512,7 +515,7 @@ class BufferProvider : public mjpResourceProvider {
     contents_.reserve(n);
     for (size_t i = 0; i < n; i++) {
       contents_.push_back(src_bytes[i]);
-      hash_ |= src_bytes[i];
+      hash_ ^= src_bytes[i];
       hash_ *= prime;
     }
   }

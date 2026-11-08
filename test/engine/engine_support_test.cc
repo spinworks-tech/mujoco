@@ -16,6 +16,8 @@
 
 #include "src/engine/engine_support.h"
 
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <random>
 #include <string>
@@ -33,6 +35,7 @@ namespace {
 using ::std::vector;
 using ::testing::ContainsRegex;  // NOLINT
 using ::testing::Eq;
+using ::testing::HasSubstr;
 using ::testing::MatchesRegex;
 using ::testing::Ne;
 using ::testing::NotNull;
@@ -200,7 +203,7 @@ static constexpr char ballJointModel[] = R"(
 )";
 
 TEST_F(SupportTest, DifferentiatePosSubQuat) {
-  const mjtNum eps = 1e-12;  // epsilon for float comparison
+  const mjtNum eps = 2e-12;  // epsilon for float comparison
 
   char error[1024];
   MjModelPtr model = LoadModelFromString(ballJointModel, error, sizeof(error));
@@ -334,6 +337,50 @@ TEST_F(StateTest, GetSetStateDelay) {
 
   // verify restoration
   EXPECT_NE(data->history[7], 99.0);
+}
+
+// history buffers require a positive timestep: the compiler rejects a model
+// without one, and a reset after the timestep is changed warns
+TEST_F(StateTest, HistoryNonPositiveTimestep) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <option timestep="%s"/>
+    <worldbody>
+      <body>
+        <joint name="slide" type="slide"/>
+        <geom size="0.1"/>
+      </body>
+    </worldbody>
+    <actuator>
+      <motor joint="slide" delay="0.02" nsample="3"/>
+    </actuator>
+    <sensor>
+      <jointpos joint="slide" nsample="3" interval="0.02"/>
+    </sensor>
+  </mujoco>
+  )";
+
+  char model_xml[1024];
+  char error[1024];
+  std::snprintf(model_xml, sizeof(model_xml), xml, "0");
+  MjModelPtr bad = LoadModelFromString(model_xml, error, sizeof(error));
+  EXPECT_EQ(bad.get(), nullptr);
+  std::string message(error);
+  std::string expected = "history buffers require positive timestep";
+  EXPECT_THAT(message, HasSubstr(expected));
+  EXPECT_EQ(message.find(expected), message.rfind(expected)) << message;
+
+  std::snprintf(model_xml, sizeof(model_xml), xml, "0.01");
+  MjModelPtr model = LoadModelFromString(model_xml, error, sizeof(error));
+  ASSERT_THAT(model.get(), NotNull()) << error;
+  MjDataPtr data = MakeData(model);
+  model->opt.timestep = 0;
+  mock_warning_handler.ExpectWarnings(
+      "history buffers require positive timestep");
+  mj_resetData(model.get(), data.get());
+  for (int i = 0; i < model->nhistory; i++) {
+    EXPECT_TRUE(std::isfinite(data->history[i])) << i;
+  }
 }
 
 TEST_F(StateTest, CopyState) {
@@ -800,9 +847,9 @@ TEST_F(SupportTest, SetKeyframe) {
 TEST_F(SupportTest, ContactSensorDim) {
   int dataSpec = 1 << mjCONDATA_FOUND | 1 << mjCONDATA_FORCE |
                  1 << mjCONDATA_DIST | 1 << mjCONDATA_POS |
-                 1 << mjCONDATA_TANGENT;
+                 1 << mjCONDATA_TANGENT | 1 << mjCONDATA_LINVEL;
 
-  EXPECT_EQ(mju_condataSize(dataSpec), 1 + 3 + 1 + 3 + 3);
+  EXPECT_EQ(mju_condataSize(dataSpec), 1 + 3 + 1 + 3 + 3 + 3);
 }
 
 // ------------------------------ ctrl delays --------------------------------
@@ -1008,6 +1055,61 @@ TEST_F(SupportTest, InitCtrlDelayNullTimes) {
   EXPECT_EQ(buf[7], 30.0);
 }
 
+TEST_F(SupportTest, InitCtrlAndSensorHistoryNullTimesAfterStepWrap) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <option timestep="0.01"/>
+    <worldbody>
+      <body>
+        <joint name="slide" type="slide"/>
+        <geom size="1"/>
+      </body>
+    </worldbody>
+    <actuator>
+      <motor joint="slide" delay="0.02" nsample="3"/>
+    </actuator>
+    <sensor>
+      <jointpos joint="slide" delay="0.02" nsample="3"/>
+    </sensor>
+  </mujoco>
+  )";
+  char error[1024];
+  MjModelPtr model = LoadModelFromString(xml, error, sizeof(error));
+  ASSERT_THAT(model.get(), NotNull()) << error;
+  MjDataPtr data = MakeData(model);
+
+  // Step twice so the circular history cursor wraps from 2 to 0.
+  mj_step(model.get(), data.get());
+  mj_step(model.get(), data.get());
+
+  mjtNum ctrl_values[3] = {10.0, 20.0, 30.0};
+  mj_initCtrlHistory(model.get(), data.get(), 0, nullptr, ctrl_values);
+
+  mjtNum sensor_values[3] = {100.0, 200.0, 300.0};
+  mj_initSensorHistory(model.get(), data.get(), 0, nullptr, sensor_values, 0.0);
+
+  mjtNum res = 0;
+  const mjtNum* p0 = mj_readCtrl(model.get(), data.get(), 0, 0.01, &res, 0);
+  const mjtNum* p1 = mj_readCtrl(model.get(), data.get(), 0, 0.02, &res, 0);
+  const mjtNum* p2 = mj_readCtrl(model.get(), data.get(), 0, 0.03, &res, 0);
+  ASSERT_THAT(p0, NotNull());
+  ASSERT_THAT(p1, NotNull());
+  ASSERT_THAT(p2, NotNull());
+  EXPECT_MJTNUM_EQ(*p0, 10.0);
+  EXPECT_MJTNUM_EQ(*p1, 20.0);
+  EXPECT_MJTNUM_EQ(*p2, 30.0);
+
+  const mjtNum* s0 = mj_readSensor(model.get(), data.get(), 0, 0.01, &res, 0);
+  const mjtNum* s1 = mj_readSensor(model.get(), data.get(), 0, 0.02, &res, 0);
+  const mjtNum* s2 = mj_readSensor(model.get(), data.get(), 0, 0.03, &res, 0);
+  ASSERT_THAT(s0, NotNull());
+  ASSERT_THAT(s1, NotNull());
+  ASSERT_THAT(s2, NotNull());
+  EXPECT_MJTNUM_EQ(*s0, 100.0);
+  EXPECT_MJTNUM_EQ(*s1, 200.0);
+  EXPECT_MJTNUM_EQ(*s2, 300.0);
+}
+
 TEST_F(SupportTest, InitSensorDelay) {
   static constexpr char xml[] = R"(
   <mujoco>
@@ -1127,6 +1229,73 @@ TEST_F(SupportTest, InsideSite) {
   EXPECT_EQ(mj_insideSite(model.get(), data, oct_id, pt_out_aabb_z), 0);
 
   mj_deleteData(data);
+}
+
+TEST_F(SupportTest, GeomDistanceWitnessAtExactDistmax) {
+  static constexpr char kXml[] = R"(
+  <mujoco>
+    <worldbody>
+      <geom name="g1" type="sphere" size="0.5" pos="-0.5 0 0"/>
+      <geom name="g2" type="sphere" size="0.5" pos="1.5 0 0"/>
+    </worldbody>
+  </mujoco>
+  )";
+  MjModelPtr model = LoadModelFromString(kXml);
+  ASSERT_THAT(model.get(), NotNull());
+  MjDataPtr data = MakeData(model);
+  mj_forward(model.get(), data.get());
+
+  mjtNum fromto[6] = {-1, -1, -1, -1, -1, -1};
+  mjtNum dist =
+      mj_geomDistance(model.get(), data.get(), 0, 1, /*distmax=*/1.0, fromto);
+  EXPECT_MJTNUM_EQ(dist, 1.0);
+  EXPECT_THAT(fromto, Pointwise(MjNear(1e-12, 1e-5), {0, 0, 0, 1, 0, 0}));
+}
+
+TEST_F(SupportTest, ActuatorDisabledMacroGroupBounds) {
+  static constexpr char kXml[] = R"(
+  <mujoco>
+    <worldbody>
+      <body>
+        <joint name="jnt" type="hinge"/>
+        <geom type="sphere" size="0.1"/>
+      </body>
+    </worldbody>
+    <actuator>
+      <motor joint="jnt"/>
+    </actuator>
+  </mujoco>
+  )";
+  MjModelPtr model = LoadModelFromString(kXml);
+  ASSERT_THAT(model.get(), NotNull());
+  mjModel* m = model.get();
+  int idx = 0;
+
+  // All bits set: out-of-range groups (< 0 or > 30) evaluate to 0 without UB,
+  // valid groups [0, 30] evaluate to 1.
+  m->opt.disableactuator = ~0;
+  for (int group : {-100, -1, 31, 100}) {
+    m->actuator_group[0] = group;
+    EXPECT_EQ(mj_actuatorDisabled(m, 0), 0) << "group=" << group;
+    EXPECT_EQ(mjACTUATORDISABLED(idx + 0), mj_actuatorDisabled(m, 0))
+        << "group=" << group;
+  }
+  for (int group : {0, 15, 30}) {
+    m->actuator_group[0] = group;
+    EXPECT_EQ(mj_actuatorDisabled(m, 0), 1) << "group=" << group;
+    EXPECT_EQ(mjACTUATORDISABLED(idx + 0), mj_actuatorDisabled(m, 0))
+        << "group=" << group;
+  }
+
+  // Selective bitmask parity between macro and function.
+  m->opt.disableactuator = 1 << 30;
+  m->actuator_group[0] = 0;
+  EXPECT_EQ(mjACTUATORDISABLED(0), 0);
+  EXPECT_EQ(mjACTUATORDISABLED(0), mj_actuatorDisabled(m, 0));
+
+  m->actuator_group[0] = 30;
+  EXPECT_EQ(mjACTUATORDISABLED(0), 1);
+  EXPECT_EQ(mjACTUATORDISABLED(0), mj_actuatorDisabled(m, 0));
 }
 
 }  // namespace

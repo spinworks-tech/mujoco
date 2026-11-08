@@ -17,7 +17,6 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -26,6 +25,7 @@
 #include <mujoco/mjmodel.h>
 #include <mujoco/mjspec.h>
 #include "engine/engine_io.h"
+#include "engine/engine_util_errmem.h"
 #include "user/user_resource.h"
 #include "xml/xml.h"
 #include "xml/xml_global.h"
@@ -74,21 +74,23 @@ mjModel* mj_loadXML(const char* filename, const mjVFS* vfs, char* error, int err
 //  returns 1 if successful, 0 otherwise
 //  error can be NULL; otherwise assumed to have size error_sz
 int mj_saveLastXML(const char* filename, const mjModel* m, char* error, int error_sz) {
+  // the file is opened once there is something to write: a failure leaves it as it was
+  const std::string result = GetGlobalXmlSpec(m, error, error_sz);
+  if (result.empty()) { return 0; }
+
   FILE* fp = stdout;
   if (filename != nullptr && filename[0] != '\0') {
-    fp = fopen(filename, "w");
+    fp = mju_fopen(filename, "w");
     if (!fp) {
       mjCopyError(error, "File not found", error_sz);
       return 0;
     }
   }
 
-  const std::string result = GetGlobalXmlSpec(m, error, error_sz);
-  if (!result.empty()) { fprintf(fp, "%s", result.c_str()); }
-
+  fprintf(fp, "%s", result.c_str());
   if (fp != stdout) { fclose(fp); }
 
-  return !result.empty();
+  return 1;
 }
 
 
@@ -107,10 +109,11 @@ int mj_printSchema(const char* filename, char* buffer, int buffer_sz, int flg_ht
 
   // filename given: write to file
   if (filename) {
-    std::ofstream file;
-    file.open(filename);
-    file << str.str();
-    file.close();
+    FILE* file = mju_fopen(filename, "w");
+    if (file) {
+      fputs(str.str().c_str(), file);
+      fclose(file);
+    }
   }
 
   // buffer given: write to buffer

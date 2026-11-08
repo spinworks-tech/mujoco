@@ -18,16 +18,26 @@
 #include "src/engine/engine_plugin.h"
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>  // NOLINT
+#include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>  // NOLINT
+#include <thread>        // NOLINT
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <absl/strings/str_format.h>
-#include <absl/strings/str_replace.h>
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_replace.h"
 #include <mujoco/mujoco.h>
 #include "test/fixture.h"
 
@@ -36,7 +46,7 @@ namespace {
 using ::testing::HasSubstr;
 using ::testing::NotNull;
 
-constexpr int kNumTruePlugins = 8;
+constexpr int kNumTruePlugins = 7;
 constexpr int kNumFakePlugins = 30;
 constexpr int kNumTestPlugins = 4;
 
@@ -712,11 +722,76 @@ TEST_F(EnginePluginTest, FilteredActuatorPlugin) {
               MjNear(0.5 + expected_act_dot * m->opt.timestep, 1e-6, 1e-4));
 }
 
-TEST_F(EnginePluginTest, ArchiveResourceProviderRegistration) {
-  int initial_count = mjp_archiveResourceProviderCount();
+// a plugin of a compiled child attached by reference starts from its initial
+// state when the parent is recompiled, as an attached copy does
+TEST_F(EnginePluginTest, RecompileAttachByReference) {
+  static constexpr char xml_parent[] = R"(
+  <mujoco>
+    <extension>
+      <plugin plugin="mujoco.test.sensor"/>
+    </extension>
+    <worldbody>
+      <frame name="f"/>
+    </worldbody>
+    <sensor>
+      <plugin plugin="mujoco.test.sensor"/>
+    </sensor>
+  </mujoco>
+  )";
+  static constexpr char xml_child[] = R"(
+  <mujoco>
+    <extension>
+      <plugin plugin="mujoco.test.sensor"/>
+    </extension>
+    <worldbody>
+      <body name="x"/>
+    </worldbody>
+    <sensor>
+      <plugin plugin="mujoco.test.sensor"/>
+    </sensor>
+  </mujoco>
+  )";
+
+  char error[1024] = {0};
+  for (bool deepcopy : {false, true}) {
+    mjSpec* parent = mj_parseXMLString(xml_parent, 0, error, sizeof(error));
+    ASSERT_THAT(parent, NotNull()) << error;
+    mjSpec* child = mj_parseXMLString(xml_child, 0, error, sizeof(error));
+    ASSERT_THAT(child, NotNull()) << error;
+    mjs_setDeepCopy(parent, deepcopy);
+    mjModel* m = mj_compile(child, nullptr);
+    ASSERT_THAT(m, NotNull()) << mjs_getError(child);
+    mj_deleteModel(m);
+
+    m = mj_compile(parent, nullptr);
+    ASSERT_THAT(m, NotNull()) << mjs_getError(parent);
+    mjData* d = mj_makeData(m);
+    ASSERT_EQ(m->npluginstate, 3);
+    d->plugin_state[0] = 7;
+    d->plugin_state[1] = 8;
+    d->plugin_state[2] = 9;
+
+    ASSERT_THAT(mjs_attach(mjs_findFrame(parent, "f")->element,
+                           mjs_findBody(child, "x")->element, "c_", ""),
+                NotNull())
+        << mjs_getError(parent);
+    ASSERT_EQ(mj_recompile(parent, nullptr, m, d), 0) << mjs_getError(parent);
+    ASSERT_EQ(m->npluginstate, 6);
+    EXPECT_THAT(AsVector(d->plugin_state, 6),
+                testing::ElementsAreArray({7, 8, 9, 1, 0, 0}));
+
+    mj_deleteData(d);
+    mj_deleteModel(m);
+    mj_deleteSpec(child);
+    mj_deleteSpec(parent);
+  }
+}
+
+TEST_F(EnginePluginTest, ArchiveProviderRegistration) {
+  int initial_count = mjp_archiveProviderCount();
 
   mjpResourceProvider provider;
-  mjp_defaultResourceProvider(&provider);
+  mjp_defaultProvider(&provider);
   provider.prefix = ".testarchive|.alsoarchive";
   provider.open = [](mjResource* res) {
     res->data = const_cast<char*>("test_handle");
@@ -729,18 +804,178 @@ TEST_F(EnginePluginTest, ArchiveResourceProviderRegistration) {
   };
   provider.close = [](mjResource* res) {};
 
-  mjp_registerArchiveResourceProvider(&provider);
+  mjp_registerArchiveProvider(&provider);
 
-  EXPECT_GT(mjp_archiveResourceProviderCount(), initial_count);
+  EXPECT_GT(mjp_archiveProviderCount(), initial_count);
 
   const mjpResourceProvider* found1 =
-      mjp_findArchiveResourceProvider("model.testarchive");
+      mjp_findArchiveProvider("model.testarchive");
   ASSERT_THAT(found1, NotNull());
   EXPECT_TRUE(found1->open != nullptr);
 
   const mjpResourceProvider* found2 =
-      mjp_findArchiveResourceProvider("model.alsoarchive");
+      mjp_findArchiveProvider("model.alsoarchive");
   ASSERT_THAT(found2, NotNull());
+}
+
+#if !defined(_WIN32) && !defined(__CYGWIN__)
+// mju_error from a failing dlopen must not longjmp past the plugin table lock,
+// or the std::string locals of mj_loadAllPluginLibraries; leaks are detected
+// when running under asan
+TEST_F(MujocoTest, LoadAllPluginLibrariesErrorReleasesLock) {
+  #if defined(__APPLE__)
+  const char* suffix = ".dylib";
+  #else
+  const char* suffix = ".so";
+  #endif
+  std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      "mujoco_load_all_plugin_libraries_error_directory_longer_than_sso";
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / (std::string("not_a_library") + suffix)) << "not an ELF";
+
+  auto load_all = MjuErrorMessageFrom(mj_loadAllPluginLibraries);
+  EXPECT_THAT(load_all(dir.string().c_str(), nullptr),
+              HasSubstr("Error loading plugin library"));
+  std::filesystem::remove_all(dir);
+
+  // registering an identical plugin takes the table lock on another thread
+  auto done = std::make_shared<std::atomic<bool>>(false);
+  std::thread([done] {
+    mjpPlugin plugin = *mjp_getPluginAtSlot(0);
+    mjp_registerPlugin(&plugin);
+    *done = true;
+  }).detach();
+  for (int i = 0; i < 500 && !*done; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_TRUE(*done) << "plugin table lock was not released";
+}
+#endif
+
+TEST_F(EnginePluginTest, ResetDataStatelessPluginNullMemcpy) {
+  static constexpr char stateless_xml[] = R"(
+  <mujoco>
+    <extension>
+      <plugin plugin="mujoco.sdf.torus">
+        <instance name="torus">
+          <config key="radius1" value="0.35"/>
+          <config key="radius2" value="0.15"/>
+        </instance>
+      </plugin>
+    </extension>
+    <asset>
+      <mesh name="torus">
+        <plugin instance="torus"/>
+      </mesh>
+    </asset>
+    <worldbody>
+      <geom type="sdf" mesh="torus">
+        <plugin instance="torus"/>
+      </geom>
+    </worldbody>
+  </mujoco>
+  )";
+  char error[1024] = {0};
+  MjModelPtr m = LoadModelFromString(stateless_xml, error, sizeof(error));
+  ASSERT_THAT(m.get(), NotNull()) << error;
+  ASSERT_GT(m->nplugin, 0);
+  ASSERT_EQ(m->npluginstate, 0);
+
+  MjDataPtr d = MakeData(m);
+  ASSERT_THAT(d.get(), NotNull());
+
+  static bool zero_alloc_requested = false;
+  zero_alloc_requested = false;
+  auto prev_malloc = mju_user_malloc;
+  auto prev_free = mju_user_free;
+  mju_user_malloc = [](size_t size) -> void* {
+    if (size == 0) {
+      zero_alloc_requested = true;
+      return nullptr;
+    }
+    return malloc(size);
+  };
+  mju_user_free = [](void* ptr) {
+    if (ptr) free(ptr);
+  };
+
+  mj_resetData(m.get(), d.get());
+
+  mju_user_malloc = prev_malloc;
+  mju_user_free = prev_free;
+
+  EXPECT_FALSE(zero_alloc_requested)
+      << "_resetData attempted zero-byte allocation for stateless plugin";
+}
+
+TEST_F(EnginePluginTest, RegisterPluginDifferentAttributes) {
+  mjpPlugin plugin = *mjp_getPlugin("mujoco.test.actuator", nullptr);
+  const char* attributes[] = {nullptr, "multiplier"};
+  plugin.attributes = attributes;
+
+  std::string err = MjuErrorMessageFrom(mjp_registerPlugin)(&plugin);
+  EXPECT_THAT(err, HasSubstr("already registered"));
+}
+
+TEST_F(MujocoTest, FindDecoderNullContentTypeCrash) {
+  char filename[] = "model.xml";
+  mjResource resource = {};
+  resource.name = filename;
+  const mjpDecoder* decoder = mjp_findDecoder(&resource, nullptr);
+  EXPECT_THAT(decoder, testing::IsNull());
+}
+
+static std::string PathToUtf8(const std::filesystem::path& p) {
+  auto u8str = p.u8string();
+  return std::string(reinterpret_cast<const char*>(u8str.data()), u8str.size());
+}
+
+TEST_F(MujocoTest, LoadAllPluginLibrariesUtf8Path) {
+#if defined(_WIN32) || defined(__CYGWIN__)
+  std::filesystem::path filename = u8"テスト_plugin.dll";
+#elif defined(__APPLE__)
+  std::filesystem::path filename = u8"テスト_plugin.dylib";
+#else
+  std::filesystem::path filename = u8"テスト_plugin.so";
+#endif
+  std::filesystem::path utf8_dir =
+      std::filesystem::path(::testing::TempDir()) / u8"mujoco_plugin_テスト";
+  std::error_code ec;
+  std::filesystem::remove_all(utf8_dir, ec);
+  ec.clear();
+  std::filesystem::create_directories(utf8_dir, ec);
+  if (ec) {
+    GTEST_SKIP() << "Could not create directory with UTF-8 name: "
+                 << ec.message();
+  }
+
+  std::string dir_u8 = PathToUtf8(utf8_dir);
+  std::string filename_u8 = PathToUtf8(filename);
+
+  // empty directory: callback should not be invoked
+  static int empty_calls = 0;
+  empty_calls = 0;
+  mj_loadAllPluginLibraries(
+      dir_u8.c_str(), +[](const char*, int, int) { ++empty_calls; });
+  EXPECT_EQ(empty_calls, 0);
+
+  std::ofstream(utf8_dir / filename) << "not a library";
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+  static char loaded_file[256] = "";
+  loaded_file[0] = '\0';
+  mj_loadAllPluginLibraries(
+      dir_u8.c_str(), +[](const char* name, int first, int count) {
+        std::snprintf(loaded_file, sizeof(loaded_file), "%s", name);
+      });
+  EXPECT_EQ(std::string(loaded_file), filename_u8);
+#else
+  auto load_all = MjuErrorMessageFrom(mj_loadAllPluginLibraries);
+  EXPECT_THAT(load_all(dir_u8.c_str(), nullptr), HasSubstr(filename_u8));
+#endif
+
+  std::filesystem::remove_all(utf8_dir);
 }
 
 }  // namespace

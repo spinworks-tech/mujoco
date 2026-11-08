@@ -39,7 +39,7 @@ SPECS = [
     ('mjsMesh',     'Spec', True,  'meshes',     'mjOBJ_MESH'),
     ('mjsSkin',     'Spec', False, 'skins',      'mjOBJ_SKIN'),
     ('mjsHField',   'Spec', False, 'hfields',    'mjOBJ_HFIELD'),
-    ('mjsTexture',  'Spec', False, 'textures',   'mjOBJ_TEXTURE'),
+    ('mjsTexture',  'Spec', True,  'textures',   'mjOBJ_TEXTURE'),
     ('mjsMaterial', 'Spec', True,  'materials',  'mjOBJ_MATERIAL'),
     ('mjsPair',     'Spec', True,  'pairs',      'mjOBJ_PAIR'),
     ('mjsEquality', 'Spec', True,  'equalities', 'mjOBJ_EQUALITY'),
@@ -164,6 +164,24 @@ def _array_binding_code(
   if classname == 'mjSpec':  # raw mjSpec has a wrapper
     rawclassname = classname.replace('mjS', 'MjS')
     fullvarname = 'ptr->' + varname
+  if classname == 'mjsFrame' and varname == 'scale':
+    return f"""\
+  {classname}.def_property(
+      "{varname}",
+      []({rawclassname}& self) -> MjDouble3 {{
+        return MjDouble3(self.{fullvarname});
+    }},
+      []({rawclassname}& self, py::object {varname}) {{
+        try {{
+          MjDouble3(self.{fullvarname}) = py::cast<Eigen::Vector3d>({varname});
+        }} catch (const py::cast_error&) {{
+          try {{
+            MjDouble3(self.{fullvarname}).setConstant(py::cast<double>({varname}));
+          }} catch (const py::cast_error&) {{
+            throw py::value_error("{varname}: expected a scalar or a sequence of size 3");
+          }}
+        }}
+    }}, py::return_value_policy::reference_internal);"""
   if innertype == 'mjtNum':
     innertype = 'MjNum'  # custom Eigen type for mjtNum fields
   elif innertype == 'double':
@@ -181,9 +199,17 @@ def _array_binding_code(
       return MjTypeVec<char>(self.{fullvarname}, {field.extents[0]});
     }},
     []({rawclassname}& self, py::object rhs) {{
+      char buf[{field.extents[0]}] = {{}};
       int i = 0;
       for (auto val : rhs) {{
-        self.{fullvarname}[i++] = py::cast<char>(val);
+        if (i >= {field.extents[0]}) {{
+          throw py::value_error(
+              "{varname} may have at most {field.extents[0]} characters");
+        }}
+        buf[i++] = py::cast<char>(val);
+      }}
+      for (int j = 0; j < {field.extents[0]}; ++j) {{
+        self.{fullvarname}[j] = buf[j];
       }}
     }}, py::return_value_policy::move);"""
   # all other array types
@@ -292,6 +318,13 @@ def _ptr_binding_code(
       }},
     []({rawclassname}& self, py::object rhs) {{
         self.{fullvarname}->clear();
+        if (py::isinstance<py::str>(rhs)) {{
+          auto s = py::cast<std::string>(rhs);
+          if (!s.empty()) {{
+            self.{fullvarname}->push_back(std::move(s));
+          }}
+          return;
+        }}
         self.{fullvarname}->reserve(py::len(rhs));
         for (auto val : rhs) {{
           self.{fullvarname}->push_back(py::cast<std::string>(val));
@@ -496,6 +529,18 @@ def generate_add() -> None:
               f'py::object& {f.name}',
               f'py::arg("{f.name}") = py::none()',
           )
+        if key == 'mjsFrame' and f.name == 'scale':
+          return (
+              (
+                  f'set_array_broadcast(out->{f.name}, {f.name},'
+                  f' {f.type.extents[0]}, "{f.name}");'
+              ),
+              'array_broadcast',
+              f.name,
+              'float | list[float]',
+              f'std::optional<py::object>& {f.name}',
+              f'py::arg("{f.name}") = py::none()',
+          )
         if (
             f.name == 'size'
             and f.type.extents[0] == 3
@@ -637,7 +682,7 @@ def generate_add() -> None:
 
     # include helper functions
     if set_types:
-      for t in set(set_types):
+      for t in sorted(set(set_types)):
         if t == 'orientation':
           code += """\n
            auto set_orientation = [](raw::MjsOrientation& orientation,
@@ -795,6 +840,26 @@ def generate_add() -> None:
               int idx = 0;
               for (auto val : array.value()) {
                 des[idx++] = val;
+              }
+            }
+          };
+          """
+        elif t == 'array_broadcast':
+          code += """\n
+          auto set_array_broadcast = [](auto&& des, const std::optional<py::object>& obj, int size, const char* name) {
+            if (obj.has_value() && !obj->is_none()) {
+              std::vector<double> array;
+              try {
+                array = py::cast<std::vector<double>>(*obj);
+              } catch (const py::cast_error&) {
+                array.assign(size, py::cast<double>(*obj));
+              }
+              if (array.size() != size) {
+                std::string msg = std::string(name) + " should be a scalar or a list/array of size " + std::to_string(size) + ".";
+                throw pybind11::value_error(msg);
+              }
+              for (int i = 0; i < size; i++) {
+                des[i] = array[i];
               }
             }
           };

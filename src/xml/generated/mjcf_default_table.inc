@@ -129,7 +129,7 @@ static const mjXDefaultEntry kDefaults_mjVisual_headlight[] = {
   {"ambient", (int)offsetof(mjVisual, headlight.ambient), 1, 3, 3, 0, {0.1, 0.1, 0.1}},
   {"diffuse", (int)offsetof(mjVisual, headlight.diffuse), 1, 3, 3, 0, {0.4, 0.4, 0.4}},
   {"specular", (int)offsetof(mjVisual, headlight.specular), 1, 3, 3, 0, {0.5, 0.5, 0.5}},
-  {"active", (int)offsetof(mjVisual, headlight.active), 2, 1, 1, 0, {1.0}},
+  {"active", (int)offsetof(mjVisual, headlight.active), 2, 1, 1, 0, {(double)2}},
 };
 
 static const mjXDefaultEntry kDefaults_mjVisual_map[] = {
@@ -223,6 +223,7 @@ static const mjXDefaultEntry kDefaults_mjsActuator[] = {
   {"actdim", (int)offsetof(mjsActuator, actdim), 2, 1, 1, 0, {-1.0}},
   {"velrange", (int)offsetof(mjsActuator, velrange), 0, 2, 0, 0, {0}},
   {"ffrange", (int)offsetof(mjsActuator, ffrange), 0, 2, 0, 0, {0}},
+  {"inheritrange", (int)offsetof(mjsActuator, inheritrange), 0, 1, 0, 0, {0}},
   {"dyntype", (int)offsetof(mjsActuator, dyntype), 2, 1, 1, 0, {(double)mjDYN_NONE}},
   {"gaintype", (int)offsetof(mjsActuator, gaintype), 2, 1, 1, 0, {(double)mjGAIN_FIXED}},
   {"biastype", (int)offsetof(mjsActuator, biastype), 2, 1, 1, 0, {(double)mjBIAS_NONE}},
@@ -230,7 +231,6 @@ static const mjXDefaultEntry kDefaults_mjsActuator[] = {
   {"gainprm", (int)offsetof(mjsActuator, gainprm), 0, mjNGAIN, 1, 0, {1.0}},
   {"biasprm", (int)offsetof(mjsActuator, biasprm), 0, mjNBIAS, 0, 0, {0}},
   {"actearly", (int)offsetof(mjsActuator, actearly), 3, 1, 0, 0, {0}},
-  {"inheritrange", (int)offsetof(mjsActuator, inheritrange), 0, 1, 0, 0, {0}},
 };
 
 static const mjXDefaultEntry kDefaults_mjsBody[] = {
@@ -240,6 +240,7 @@ static const mjXDefaultEntry kDefaults_mjsBody[] = {
   {"gravcomp", (int)offsetof(mjsBody, gravcomp), 0, 1, 0, 0, {0}},
   {"sleep", (int)offsetof(mjsBody, sleep), 2, 1, 0, 0, {0}},
   {"simple", (int)offsetof(mjsBody, simple), 3, 1, 1, 0, {(double)1}},
+  {"fuse", (int)offsetof(mjsBody, fuse), 3, 1, 1, 0, {(double)1}},
   {"pos", (int)offsetof(mjsBody, ipos), 0, 3, 0, 1, {0}},
   {"quat", (int)offsetof(mjsBody, iquat), 0, 4, 4, 0, {1.0, 0.0, 0.0, 0.0}},
   {"mass", (int)offsetof(mjsBody, mass), 0, 1, 0, 0, {0}},
@@ -276,8 +277,11 @@ static const mjXDefaultEntry kDefaults_mjsCompiler[] = {
   {"inertiafromgeom", (int)offsetof(mjsCompiler, inertiafromgeom), 2, 1, 1, 0, {(double)2}},
   {"inertiagrouprange", (int)offsetof(mjsCompiler, inertiagrouprange), 2, 2, 2, 0, {0.0, 5.0}},
   {"saveinertial", (int)offsetof(mjsCompiler, saveinertial), 3, 1, 0, 0, {0}},
+  {"savecompiled", (int)offsetof(mjsCompiler, savecompiled), 3, 1, 1, 0, {1}},
+  {"savecanonical", (int)offsetof(mjsCompiler, savecanonical), 3, 1, 1, 0, {1}},
   {"alignfree", (int)offsetof(mjsCompiler, alignfree), 3, 1, 0, 0, {0}},
   {"conflict", (int)offsetof(mjsCompiler, conflict), 2, 1, 0, 0, {0}},
+  {"passthrough", (int)offsetof(mjsCompiler, passthrough), 2, 1, 0, 0, {0}},
 };
 
 static const mjXDefaultEntry kDefaults_mjsEquality[] = {
@@ -289,9 +293,13 @@ static const mjXDefaultEntry kDefaults_mjsEquality[] = {
 static const mjXDefaultEntry kDefaults_mjsFlex[] = {
   {"young", (int)offsetof(mjsFlex, young), 0, 1, 0, 0, {0}},
   {"poisson", (int)offsetof(mjsFlex, poisson), 0, 1, 0, 0, {0}},
+  {"shear", (int)offsetof(mjsFlex, shear), 0, 1, 0, 0, {0}},
   {"damping", (int)offsetof(mjsFlex, damping), 0, 1, 0, 0, {0}},
   {"thickness", (int)offsetof(mjsFlex, thickness), 0, 1, 1, 0, {-1.0}},
+  {"yield", (int)offsetof(mjsFlex, stressyield), 0, 2, 0, 0, {0}},
   {"elastic2d", (int)offsetof(mjsFlex, elastic2d), 2, 1, 0, 0, {0}},
+  {"section", (int)offsetof(mjsFlex, section), 2, 1, 0, 0, {0}},
+  {"sectionsize", (int)offsetof(mjsFlex, sectionsize), 0, 2, 0, 0, {0}},
   {"contype", (int)offsetof(mjsFlex, contype), 2, 1, 1, 0, {1.0}},
   {"conaffinity", (int)offsetof(mjsFlex, conaffinity), 2, 1, 1, 0, {1.0}},
   {"condim", (int)offsetof(mjsFlex, condim), 2, 1, 1, 0, {3.0}},
@@ -318,6 +326,9 @@ static const mjXDefaultEntry kDefaults_mjsFlex[] = {
 static const mjXDefaultEntry kDefaults_mjsFrame[] = {
   {"pos", (int)offsetof(mjsFrame, pos), 0, 3, 0, 0, {0}},
   {"quat", (int)offsetof(mjsFrame, quat), 0, 4, 4, 0, {1.0, 0.0, 0.0, 0.0}},
+  {"scale", (int)offsetof(mjsFrame, scale), 0, 3, 3, 0, {1.0, 1.0, 1.0}},
+  {"scaling", (int)offsetof(mjsFrame, scaling), 2, 1, 1, 0, {(double)mjSCALING_SIMILAR}},
+  {"massscale", (int)offsetof(mjsFrame, massscale), 0, 1, 1, 0, {0.0}},
 };
 
 static const mjXDefaultEntry kDefaults_mjsGeom[] = {
@@ -344,6 +355,7 @@ static const mjXDefaultEntry kDefaults_mjsGeom[] = {
   {"quat", (int)offsetof(mjsGeom, quat), 0, 4, 4, 0, {1.0, 0.0, 0.0, 0.0}},
   {"fitscale", (int)offsetof(mjsGeom, fitscale), 0, 1, 1, 0, {1.0}},
   {"rgba", (int)offsetof(mjsGeom, rgba), 1, 4, 4, 0, {0.5, 0.5, 0.5, 1.0}},
+  {"castshadow", (int)offsetof(mjsGeom, castshadow), 3, 1, 1, 0, {1}},
   {"fluidshape", (int)offsetof(mjsGeom, fluid_ellipsoid), 4, 1, 0, 0, {0}},
   {"fluidcoef", (int)offsetof(mjsGeom, fluid_coefs), 4, 5, 5, 0, {0.5, 0.25, 1.5, 1.0, 1.0}},
 };
@@ -373,6 +385,7 @@ static const mjXDefaultEntry kDefaults_mjsJoint[] = {
   {"margin", (int)offsetof(mjsJoint, margin), 0, 1, 0, 0, {0}},
   {"ref", (int)offsetof(mjsJoint, ref), 0, 1, 0, 0, {0}},
   {"springref", (int)offsetof(mjsJoint, springref), 0, 1, 0, 0, {0}},
+  {"springyield", (int)offsetof(mjsJoint, springyield), 0, 1, 0, 0, {0}},
   {"armature", (int)offsetof(mjsJoint, armature), 0, 1, 0, 0, {0}},
   {"damping", (int)offsetof(mjsJoint, damping), 0, mjNPOLY+1, 0, 0, {0}},
   {"frictionloss", (int)offsetof(mjsJoint, frictionloss), 0, 1, 0, 0, {0}},
@@ -480,6 +493,7 @@ static const mjXDefaultEntry kDefaults_mjsTendon[] = {
   {"solimpfriction", (int)offsetof(mjsTendon, solimp_friction), 4, mjNIMP, 5, 0, {0.9, 0.95, 0.001, 0.5, 2.0}},
   {"frictionloss", (int)offsetof(mjsTendon, frictionloss), 0, 1, 0, 0, {0}},
   {"springlength", (int)offsetof(mjsTendon, springlength), 0, 2, 2, 0, {-1.0, -1.0}},
+  {"springyield", (int)offsetof(mjsTendon, springyield), 0, 1, 0, 0, {0}},
   {"width", (int)offsetof(mjsTendon, width), 0, 1, 1, 0, {0.003}},
   {"margin", (int)offsetof(mjsTendon, margin), 0, 1, 0, 0, {0}},
   {"stiffness", (int)offsetof(mjsTendon, stiffness), 0, mjNPOLY+1, 0, 0, {0}},
@@ -503,6 +517,7 @@ static const mjXDefaultEntry kDefaults_mjsTexture[] = {
   {"hflip", (int)offsetof(mjsTexture, hflip), 3, 1, 0, 0, {0}},
   {"vflip", (int)offsetof(mjsTexture, vflip), 3, 1, 0, 0, {0}},
   {"nchannel", (int)offsetof(mjsTexture, nchannel), 2, 1, 1, 0, {3.0}},
+  {"embed", (int)offsetof(mjsTexture, embed), 2, 1, 1, 0, {(double)2}},
 };
 
 static const mjXDefaultTable kDefaultTables[] = {

@@ -90,9 +90,11 @@ public class MjImporterWithAssets : MjcfImporter {
 
   protected override void ParseGeom(GameObject parentObject, XmlElement child) {
     var gameObject = CreateGameObjectWithUniqueName<MjGeom>(parentObject, child);
-    gameObject.AddComponent<MjMeshFilter>();
-    var renderer = gameObject.AddComponent<MeshRenderer>();
-    ResolveOrCreateMaterial(renderer, child);
+    if (gameObject.GetComponent<MjGeom>().ShapeType != MjShapeComponent.ShapeTypes.HField) {
+      gameObject.AddComponent<MjMeshFilter>();
+      var renderer = gameObject.AddComponent<MeshRenderer>();
+      ResolveOrCreateMaterial(renderer, child);
+    }
   }
 
   private void ConfigureMeshPath(string path, string projectName, XmlDocument mjcf) {
@@ -304,11 +306,11 @@ public class MjImporterWithAssets : MjcfImporter {
         // If geom is nameless, use a random number.
         var name =
           MjEngineTool.Sanitize(parentNode.GetStringAttribute(
-            "name", defaultValue: $"{UnityEngine.Random.Range(0, 1000000)}"));
+            "name", defaultValue: $"{UnityEngine.Random.Range(0, int.MaxValue)}"));
         var assetPath = Path.Combine(_targetAssetDir, name+".mat");
-        if (AssetDatabase.LoadMainAssetAtPath(assetPath) != null) {
-          throw new Exception(
-            $"Creating a material asset for the geom {name}, but {assetPath} already exists.");
+        var suffix = 0;
+        while (AssetDatabase.LoadMainAssetAtPath(assetPath) != null) {
+          assetPath = Path.Combine(_targetAssetDir, $"{name}_{++suffix}.mat");
         }
         AssetDatabase.CreateAsset(material, assetPath);
         AssetDatabase.SaveAssets();

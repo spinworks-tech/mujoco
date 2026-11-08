@@ -195,6 +195,11 @@ create an arbitrary data structure that it requires to function and stores its p
 :ref:`mjData` that is being created. During :ref:`mj_deleteData`, MuJoCo calls the ``destroy`` callback from the same
 :ref:`mjpPlugin`, and the plugin is responsible for deallocating its internal resources associated with the instance.
 
+The ``init`` callback should report an invalid configuration by issuing a :ref:`mju_warning` and returning -1, upon
+which :ref:`mj_makeData` (and model compilation) fails. Plugin callbacks should not call :ref:`mju_error`: error
+handlers which do not return, like those of the Python bindings and the model compiler, skip the destructors of C++
+objects on the stack, in the plugin and in MuJoCo itself.
+
 When :ref:`mjData` is being copied via :ref:`mj_copyData`, MuJoCo will copy over the plugin state. However, the plugin
 code is responsible for setting up the plugin data for the newly copied :ref:`mjData`. To facilitate this, MuJoCo calls
 the ``copy`` callback from :ref:`mjpPlugin` for each plugin instance present.
@@ -275,17 +280,6 @@ implement custom actuators, so far only a PID controller. See the `README
 <https://github.com/google-deepmind/mujoco/blob/main/plugin/actuator/README.md>`__ for details.
 
 
-elasticity
-""""""""""
-The plugins in the `elasticity/ <https://github.com/google-deepmind/mujoco/tree/main/plugin/elasticity>`__ directory are
-passive forces based on continuum mechanics for 1-dimensional and 2-dimensional bodies. The 1D model is invariant under
-rotations and captures the large deformation of elastic cables, decoupling twisting and bending strains. The 2D model is
-a suitable for computing the bending stiffness of thin elastic plates (i.e. shells having a flat stress-free
-configuration). In this case, the elastic energy is quadratic and therefore the stiffness matrix is constant. For more
-information, please see the `README
-<https://github.com/google-deepmind/mujoco/blob/main/plugin/elasticity/README.md>`__.
-
-
 sensor
 """"""
 The plugins in the `sensor/ <https://github.com/google-deepmind/mujoco/tree/main/plugin/sensor>`__ directory implement
@@ -313,7 +307,9 @@ gradient descent iterations is set using :ref:`sdf_iterations<option-sdf_iterati
 While *exact* SDFs---encoding the precise signed distance to the surface---are preferred, collisions are possible with
 any function whose value vanishes at the surface and grows monotonically away from it, with a negative sign in the
 interior. For such functions, it is still possible to find collisions, albeit with a possibly
-increased number of starting points.
+increased number of starting points. Note that if :math:`\|\nabla f\| \neq 1` near the zero level set, contact
+penetration depth is scaled accordingly and gradient-descent projection steps are distorted, so
+:math:`\|\nabla f\| \approx 1` near the surface is recommended.
 
 The ``sdf_distance`` method is called by the compiler to produce a visual mesh for rendering using the marching cubes
 algorithm implemented by `MarchingCubeCpp <https://github.com/aparis69/MarchingCubeCpp>`__.
@@ -383,7 +379,10 @@ A decoder is described by the :ref:`mjpDecoder` struct, which has the following 
   A callback of type :ref:`mjfDecode` that performs the actual decoding. It receives an :ref:`mjResource` and
   returns a newly allocated :ref:`mjSpec` containing the decoded asset data. The caller takes
   ownership of the returned spec and is responsible for freeing it with :ref:`mj_deleteSpec`. Returns ``NULL`` on
-  failure.
+  failure, in which case the decoder should write a human-readable reason into the ``error`` buffer of size
+  ``error_sz``, if ``error`` is not ``NULL``. This message is propagated to the user, e.g. via the ``error``
+  argument of :ref:`mj_parse` or as a compiler error for mesh assets. Non-fatal issues can be reported with
+  :ref:`mju_warning`. Decoders should not call :ref:`mju_error`, see :ref:`plugin state<exPluginState>`.
 
 When a decoder is invoked for a mesh asset, the compiler will reference the first mesh element in the spec returned
 by the ``decode`` callback.
@@ -423,13 +422,14 @@ Below is a minimal decoder that reads a hypothetical binary mesh format:
 
 .. code-block:: C
 
+   #include <stdio.h>
    #include <mujoco.h>
 
-   static mjSpec* MyDecode(mjResource* resource, const mjVFS* vfs) {
+   static mjSpec* MyDecode(mjResource* resource, const mjVFS* vfs, char* error, int error_sz) {
      const void* bytes = NULL;
      int nbytes = mju_readResource(resource, &bytes);
      if (nbytes < 0) {
-       mju_warning("failed to read resource '%s'", resource->name);
+       if (error) snprintf(error, error_sz, "failed to read resource '%s'", resource->name);
        return NULL;
      }
 
@@ -531,9 +531,10 @@ plugin library is loaded.
 Resource providers
 ~~~~~~~~~~~~~~~~~~
 
-Resource providers extend MuJoCo to load assets (XML files, meshes, textures, and etc.) that don't necessarily come from
-the OS filesystem or the Virtual File System (:ref:`mjVFS`). For example, downloading assets from the Internet could be
-implemented as a resource provider. These extensions are handled abstractly in MuJoCo via the :ref:`mjResource` struct.
+Resource providers (:ref:`mjpResourceProvider`) extend MuJoCo to load assets (XML files, meshes, textures, and etc.)
+that don't necessarily come from the OS filesystem or the Virtual File System (:ref:`mjVFS`). For example, downloading
+assets from the Internet could be implemented as a resource provider. These extensions are handled abstractly in MuJoCo
+via the :ref:`mjResource` struct.
 
 .. _exProviderStructure:
 
@@ -541,8 +542,8 @@ Overview
 ^^^^^^^^
 
 Creating a new resource provider works by registering a :ref:`mjpResourceProvider` struct via
-:ref:`mjp_registerResourceProvider` in a global table. Once a resource provider is registered it can be used by all
-loading functions. The :ref:`mjpResourceProvider` struct stores three types of fields:
+:ref:`mjp_registerProvider` in a global table. Once a resource provider is registered it can be used by all loading
+functions. The :ref:`mjpResourceProvider` struct stores three types of fields:
 
 .. _Uniform Resource Identifier: https://en.wikipedia.org/wiki/Uniform_Resource_Identifier
 
@@ -632,7 +633,7 @@ Next we create the resource provider and register it with MuJoCo:
 
 .. code-block:: C
 
-   mjpResourceProvider resourceProvider = {
+   mjpResourceProvider provider = {
      .prefix = "data",
      .open = str_open_callback,
      .read = str_read_callback,
@@ -640,7 +641,7 @@ Next we create the resource provider and register it with MuJoCo:
    };
 
    // return positive number on success
-   if (!mjp_registerResourceProvider(&resourceProvider)) {
+   if (!mjp_registerProvider(&provider)) {
      // ...
      // return failure
    }

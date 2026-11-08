@@ -16,6 +16,7 @@
 #define MUJOCO_SRC_RENDER_FILAMENT_SUPPORT_MODEL_RENDERABLES_H_
 
 #include <array>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -25,8 +26,9 @@
 #include <mujoco/mjrfilament.h>
 #include <mujoco/mjvisualize.h>
 #include <mujoco/mujoco.h>
-#include "render/filament/mjrfilament_cpp.h"
-#include "render/filament/support/model_objects.h"
+#include "render/filament/support/mesh_util.h"
+#include "render/filament/support/mjrf_ptr.h"
+#include "render/filament/support/model_resources.h"
 
 namespace mujoco {
 
@@ -34,7 +36,7 @@ namespace mujoco {
 class ModelRenderables {
  public:
   // Populates the mjrScene with the renderables from the model.
-  ModelRenderables(mjrfScene* scene, ModelObjects* model_objects);
+  ModelRenderables(mjrfScene* scene, ModelResources* model_resources);
   ~ModelRenderables();
 
   // Updates the state of the renderables in the scene.
@@ -49,9 +51,9 @@ class ModelRenderables {
   mjrfRenderable* GetRenderable(mjtObj obj_type, int obj_index,
                                 int sub_index = -1);
 
-  // Returns the material for the given object as defined in the mjModel/mjData.
-  mjrfMaterial GetMaterial(mjtObj obj_type, int obj_index,
-                           const mjData* data = nullptr);
+  // Returns the object type and index corresponding to the given
+  // segmentation ID.
+  std::pair<mjtObj, int> GetObjectFromSegmentationId(int segmentation_id) const;
 
   // Marks the given object as "selected", unmarking any previously selected
   // object.
@@ -60,17 +62,10 @@ class ModelRenderables {
   // Sets the visualization options on the renderables. The following options
   // are supported:
   // - shows/hides renderables based on the group visibility
-  // - shows/hides renderables based on mjVIS_SKIN, mjVIS_FLEXSKIN,
-  //   mjVIS_TENDON, and mjVIS_ACTUATOR flags
+  // - shows/hides renderables based on mjVIS_STATIC, mjVIS_SKIN,
+  //   mjVIS_FLEXSKIN, mjVIS_TENDON, and mjVIS_ACTUATOR flags
   // - switches meshes to convex hull mode if mjVIS_CONVEXHULL is enabled
   void SetOptions(const mjvOption& opt);
-
-  // Returns the object type and index corresponding to the given
-  // segmentation ID.
-  std::pair<mjtObj, int> GetObjectFromSegmentationId(int segmentation_id) const;
-
-  // Returns the current visualization options.
-  const mjvOption& GetOptions() const { return vopts_; }
 
   ModelRenderables(const ModelRenderables&) = delete;
   ModelRenderables& operator=(const ModelRenderables&) = delete;
@@ -82,6 +77,7 @@ class ModelRenderables {
   void AddSkinGeoms();
   void AddSliderCrankGeoms();
 
+  void UpdateQuality();
   void UpdateSpatialTendons(const mjData* data, int tendon_id);
   void AppendSegmentToTendon(int tendon_id);
   void RemoveSegmentFromTendon(int tendon_id);
@@ -91,10 +87,17 @@ class ModelRenderables {
 
   void SetVisibility(mjtObj obj_type, int idx, bool visible);
 
+  mjrfMaterial GetMaterial(mjtObj obj_type, int obj_index,
+                           const mjData* data = nullptr,
+                           std::optional<int> matid_override = std::nullopt);
+
   mjrfScene* scene_;
-  ModelObjects* model_objects_;
+  ModelResources* model_resources_;
 
   mjvOption vopts_;
+  int numstacks_ = 0;
+  int numslices_ = 0;
+  int numquads_ = 0;
   mjtObj selected_obj_type_ = mjOBJ_UNKNOWN;
   int selected_obj_index_ = -1;
 
@@ -102,6 +105,9 @@ class ModelRenderables {
   std::vector<UniquePtr<mjrfRenderable>> sites_;
   std::vector<UniquePtr<mjrfRenderable>> skins_;
   std::vector<std::vector<UniquePtr<mjrfRenderable>>> flexes_;
+  std::vector<std::vector<FlexMeshSlice>> flex_slices_;
+  // 1D flexes whose edge renderables currently hold box meshes (box-section rods)
+  std::vector<bool> flex_box_mesh_;
   std::vector<std::vector<UniquePtr<mjrfRenderable>>> tendons_;
   std::unordered_map<int, std::array<UniquePtr<mjrfRenderable>, 2>>
       slider_cranks_;

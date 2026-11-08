@@ -127,6 +127,7 @@ exclude_patterns = [
     'APIreference/functions.rst',
     'APIreference/functions_override.rst',
     'XMLschema.rst',
+    'XMLunits.rst',
 ]
 
 redirects = {
@@ -135,6 +136,7 @@ redirects = {
     'computation': 'computation/index.html',
     'programming': 'programming/index.html',
     'APIreference': 'APIreference/index.html',
+    'studio': 'studio/index.html',
 }
 
 rst_prolog = """

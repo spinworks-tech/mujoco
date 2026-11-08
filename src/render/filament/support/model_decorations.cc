@@ -25,7 +25,7 @@
 #include <math/vec4.h>
 #include <mujoco/mjrfilament.h>
 #include <mujoco/mujoco.h>
-#include "render/filament/mjrfilament_cpp.h"
+#include "render/filament/support/mjrf_ptr.h"
 
 namespace mujoco {
 
@@ -47,7 +47,7 @@ ModelDecorations::~ModelDecorations() {
 
 void ModelDecorations::Clear() {
   for (auto& iter : decorations_) {
-    mjrf_removeRenderableFromScene(scene_, iter.get());
+    mjrf_removeSceneRenderable(scene_, iter.get());
   }
   decorations_.clear();
   meshes_.clear();
@@ -75,7 +75,7 @@ static mat4 CalcClipFromWorld(const mjModel* model, const mjData* data,
   const float frustum_near = zclip[0];
   const float frustum_far = zclip[1];
 
-  bool orthographic = model->vis.global.orthographic;
+  bool orthographic = mjv_camera.orthographic;
   if (mjv_camera.type == mjCAMERA_FIXED) {
     const int cid = mjv_camera.fixedcamid;
     if (cid < 0 || cid >= model->ncam) {
@@ -162,7 +162,7 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
 
       mjrfMaterial material;
       mjrf_defaultMaterial(&material);
-      material.decor_ux = true;
+      material.decor = true;
       material.color[0] = model_->flex_rgba[4 * geom.objid + 0];
       material.color[1] = model_->flex_rgba[4 * geom.objid + 1];
       material.color[2] = model_->flex_rgba[4 * geom.objid + 2];
@@ -175,7 +175,7 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
       const int vertnum = mjv_scene_.flexvertnum[geom.objid];
       const float radius = model_->flex_radius[geom.objid];
 
-      if (mjv_scene_.flexvertopt) {
+      if (geom.dataid <= 0 && mjv_scene_.flexvertopt) {
         // Use small spheres to represent vertices.
         const float rot[] = {1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f};
         const float size[] = {radius, radius, radius};
@@ -184,14 +184,14 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
           mjrf_setRenderableGeomMesh(vertex.get(), mjGEOM_SPHERE, 8, 8, 1);
           mjrf_setRenderableMaterial(vertex.get(), &material);
           mjrf_setRenderableSize(vertex.get(), size);
-          mjrf_setRenderableTransform(vertex.get(), mjv_scene_.flexvert + 3 * v,
+          mjrf_setRenderablePose(vertex.get(), mjv_scene_.flexvert + 3 * v,
                                       rot);
-          mjrf_addRenderableToScene(scene_, vertex.get());
+          mjrf_addSceneRenderable(scene_, vertex.get());
           decorations_.push_back(std::move(vertex));
         }
       }
 
-      if (mjv_scene_.flexedgeopt) {
+      if (geom.dataid <= 0 && mjv_scene_.flexedgeopt) {
         const int edgeadr = mjv_scene_.flexedgeadr[geom.objid];
         const int edgenum = mjv_scene_.flexedgenum[geom.objid];
 
@@ -228,15 +228,20 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
           mjrf_setRenderableGeomMesh(vertex.get(), mjGEOM_CYLINDER, 1, 8, 1);
           mjrf_setRenderableMaterial(vertex.get(), &material);
           mjrf_setRenderableSize(vertex.get(), size);
-          mjrf_setRenderableTransform(vertex.get(), pos, rot);
-          mjrf_addRenderableToScene(scene_, vertex.get());
+          mjrf_setRenderablePose(vertex.get(), pos, rot);
+          mjrf_addSceneRenderable(scene_, vertex.get());
           decorations_.push_back(std::move(vertex));
         }
       }
 
-      if (mjv_scene_.flexfaceopt && mjv_scene_.flexfaceused[geom.objid]) {
+      const int facenum = geom.dataid >= 0
+                              ? static_cast<int>(geom.size[2])
+                              : mjv_scene_.flexfaceused[geom.objid];
+      if (mjv_scene_.flexfaceopt && facenum > 0) {
         const bool has_uvs = geom.texcoord && geom.matid >= 0;
-        const int addr = mjv_scene_.flexfaceadr[geom.objid];
+        const int addr =
+            mjv_scene_.flexfaceadr[geom.objid] +
+            (geom.dataid >= 0 ? static_cast<int>(geom.size[1]) : 0);
         const float* positions = mjv_scene_.flexface + (9 * addr);
         const float* normals = mjv_scene_.flexnormal + (9 * addr);
         const float* uvs =
@@ -245,8 +250,8 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
         mjrfMeshConfig config;
         mjrf_defaultMeshConfig(&config);
         config.num_attributes = has_uvs ? 3 : 2;
-        config.max_vertices = 3 * mjv_scene_.flexfaceused[geom.objid];
-        config.max_indices = 3 * mjv_scene_.flexfaceused[geom.objid];
+        config.max_vertices = 3 * facenum;
+        config.max_indices = 3 * facenum;
         config.attributes[0].usage = mjVERTEX_ATTRIBUTE_USAGE_POSITION;
         config.attributes[0].type = mjVERTEX_ATTRIBUTE_TYPE_FLOAT3;
         config.attributes[1].usage = mjVERTEX_ATTRIBUTE_USAGE_NORMAL;
@@ -261,21 +266,21 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
         data.vertices[0] = positions;
         data.vertices[1] = normals;
         data.vertices[2] = uvs;
-        data.num_vertices = 3 * mjv_scene_.flexfaceused[geom.objid];
-        data.num_indices = 3 * mjv_scene_.flexfaceused[geom.objid];
+        data.num_vertices = 3 * facenum;
+        data.num_indices = 3 * facenum;
         data.indices = nullptr;
         data.compute_bounds = true;
         data.release = nullptr;
         data.user_data = nullptr;
 
         auto mesh = CreateMesh(ctx_, config);
-        mjrf_setMeshData(mesh.get(), &data);
+        mjrf_uploadMesh(mesh.get(), &data);
         meshes_.push_back(std::move(mesh));
 
         auto renderable = CreateRenderable(ctx_, params);
         mjrf_setRenderableMesh(renderable.get(), meshes_.back().get(), 0, 0);
         mjrf_setRenderableMaterial(renderable.get(), &material);
-        mjrf_addRenderableToScene(scene_, renderable.get());
+        mjrf_addSceneRenderable(scene_, renderable.get());
         decorations_.push_back(std::move(renderable));
       }
       continue;
@@ -287,7 +292,7 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
 
     mjrf_setRenderableGeomMesh(renderable.get(), geom_type, nstack, nslice,
                                nquad);
-    mjrf_setRenderableTransform(renderable.get(), geom.pos, geom.mat);
+    mjrf_setRenderablePose(renderable.get(), geom.pos, geom.mat);
     if (geom_type == mjGEOM_PLANE) {
       // Planes only define an xy size, so set the z-dimension to 1.0f.
       const float size[3] = {geom.size[0], geom.size[1], 1.0f};
@@ -298,14 +303,14 @@ void ModelDecorations::Update(mjData* data, const mjvOption* vis_option,
 
     mjrfMaterial material;
     mjrf_defaultMaterial(&material);
-    material.decor_ux = true;
+    material.decor = true;
     material.color[0] = geom.rgba[0];
     material.color[1] = geom.rgba[1];
     material.color[2] = geom.rgba[2];
     material.color[3] = geom.rgba[3];
     mjrf_setRenderableMaterial(renderable.get(), &material);
 
-    mjrf_addRenderableToScene(scene_, renderable.get());
+    mjrf_addSceneRenderable(scene_, renderable.get());
     decorations_.push_back(std::move(renderable));
   }
 }

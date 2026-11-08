@@ -14,6 +14,7 @@
 
 #include "render/filament/core/light.h"
 
+#include <functional>
 #include <numbers>
 #include <utility>
 
@@ -89,10 +90,10 @@ Light::Light(filament::Engine* engine, const mjrfLightParams& params)
   filament::LightManager::Builder builder(type);
   builder.color(ReadFloat3(params.color));
   builder.intensityCandela(params.intensity);
-  builder.castShadows(params.cast_shadows);
+  builder.castShadows(params.cast_shadow);
   if (type == filament::LightManager::Type::SPOT) {
-    auto angles = GetSpotLightConeAngles(params.spot_cone_angle,
-                                         params.spot_softness);
+    auto angles = GetSpotLightConeAngles(params.cutoff,
+                                         params.softness);
     builder.spotLightCone(angles.first, angles.second);
   }
   if (type != filament::LightManager::Type::DIRECTIONAL) {
@@ -104,10 +105,6 @@ Light::Light(filament::Engine* engine, const mjrfLightParams& params)
       type == filament::LightManager::Type::DIRECTIONAL ? 4 : 1;
   opts.shadowBulbRadius = params.bulb_radius;
   opts.mapSize = params.shadow_map_size;
-  if (params.vsm_blur_width > 0.0f) {
-    opts.vsm.elvsm = true;
-    opts.vsm.blurWidth = params.vsm_blur_width;
-  }
 
   builder.shadowOptions(opts);
 
@@ -119,6 +116,10 @@ Light::Light(filament::Engine* engine, const mjrfLightParams& params)
 }
 
 Light::~Light() noexcept {
+  if (remove_from_scene_fn_) {
+    auto on_destroy = std::move(remove_from_scene_fn_);
+    on_destroy(this);
+  }
   if (ibl_) {
     engine_->destroy(ibl_);
   } else {
@@ -130,20 +131,35 @@ Light::~Light() noexcept {
   }
 }
 
-void Light::AddToScene(filament::Scene* scene) {
+void Light::AddToScene(filament::Scene* scene,
+                       std::function<void(Light*)> on_destroy) {
+  if (assigned_scene_) {
+    if (assigned_scene_ != scene) {
+      mju_error("Cannot add light to multiple scenes.");
+    }
+    // Entities are already added to the scene.
+    return;
+  }
   if (ibl_) {
     scene->setIndirectLight(ibl_);
   } else {
     scene->addEntity(entity_);
   }
+  assigned_scene_ = scene;
+  remove_from_scene_fn_ = std::move(on_destroy);
 }
 
 void Light::RemoveFromScene(filament::Scene* scene) {
+  if (assigned_scene_ != scene) {
+    mju_error("Attempting to remove light from wrong scene.");
+  }
   if (ibl_) {
     scene->setIndirectLight(nullptr);
   } else {
     scene->remove(entity_);
   }
+  assigned_scene_ = nullptr;
+  remove_from_scene_fn_ = nullptr;
 }
 
 void Light::SetTransform(filament::math::float3 position,
@@ -188,23 +204,23 @@ void Light::SetRange(float range) {
 }
 
 void Light::SetCutoffAngle(float cutoff) {
-  if (params_.spot_cone_angle != cutoff && ibl_ == nullptr) {
-    auto angles = GetSpotLightConeAngles(cutoff, params_.spot_softness);
+  if (params_.cutoff != cutoff && ibl_ == nullptr) {
+    auto angles = GetSpotLightConeAngles(cutoff, params_.softness);
     filament::LightManager& lm = engine_->getLightManager();
     const filament::LightManager::Instance li = lm.getInstance(entity_);
     lm.setSpotLightCone(li, angles.first, angles.second);
   }
-  params_.spot_cone_angle = cutoff;
+  params_.cutoff = cutoff;
 }
 
 void Light::SetSoftness(float softness) {
-  if (params_.spot_softness != softness && ibl_ == nullptr) {
-    auto angles = GetSpotLightConeAngles(params_.spot_cone_angle, softness);
+  if (params_.softness != softness && ibl_ == nullptr) {
+    auto angles = GetSpotLightConeAngles(params_.cutoff, softness);
     filament::LightManager& lm = engine_->getLightManager();
     const filament::LightManager::Instance li = lm.getInstance(entity_);
     lm.setSpotLightCone(li, angles.first, angles.second);
   }
-  params_.spot_softness = softness;
+  params_.softness = softness;
 }
 
 void Light::SetBulbRadius(float radius) {
@@ -218,25 +234,13 @@ void Light::SetBulbRadius(float radius) {
   params_.bulb_radius = radius;
 }
 
-void Light::SetBlurWidth(float blur_width) {
-  if (params_.vsm_blur_width != blur_width && ibl_ == nullptr) {
-    filament::LightManager& lm = engine_->getLightManager();
-    const filament::LightManager::Instance li = lm.getInstance(entity_);
-    filament::LightManager::ShadowOptions opts = lm.getShadowOptions(li);
-    opts.vsm.elvsm = blur_width > 0.0f;
-    opts.vsm.blurWidth = blur_width;
-    lm.setShadowOptions(li, opts);
-  }
-  params_.vsm_blur_width = blur_width;
-}
-
 void Light::SetShadowsEnabled(bool enabled) {
-  if (params_.cast_shadows != enabled && ibl_ == nullptr) {
+  if (params_.cast_shadow != enabled && ibl_ == nullptr) {
     filament::LightManager& lm = engine_->getLightManager();
     const filament::LightManager::Instance li = lm.getInstance(entity_);
     lm.setShadowCaster(li, enabled);
   }
-  params_.cast_shadows = enabled;
+  params_.cast_shadow = enabled;
 }
 
 void Light::SetShadowMapSize(int map_size) {

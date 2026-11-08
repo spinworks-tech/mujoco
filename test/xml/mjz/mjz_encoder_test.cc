@@ -22,22 +22,25 @@
 #include <filesystem>  // NOLINT
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <absl/strings/match.h>
+#include "absl/strings/match.h"
 
 // Disable unused function warnings for miniz.
+// NOLINTBEGIN(misc-include-cleaner) - Disable clang-tidy for miniz.
 #if defined(__GNUC__) || defined(__clang__)
   #pragma GCC diagnostic push
   #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
-#include <miniz.h>
+#include "miniz.h"
 #if defined(__GNUC__) || defined(__clang__)
   #pragma GCC diagnostic pop
 #endif
+// NOLINTEND(misc-include-cleaner) - End clang-tidy disable for miniz.
 #include <mujoco/mjmodel.h>
 #include <mujoco/mjplugin.h>
 #include <mujoco/mjspec.h>
@@ -66,9 +69,12 @@ static std::string SanitizePathForTestName(const std::string& path) {
   fs::path p(path);
   std::string name = p.stem().string();
   std::string full_name = p.string();
-  size_t pos = full_name.find("third_party/mujoco");
-  if (pos != std::string::npos) {
-    full_name = full_name.substr(pos);
+  for (std::string_view marker : {"third_party/mujoco/", "_main/"}) {
+    size_t pos = full_name.find(marker);
+    if (pos != std::string::npos) {
+      full_name = full_name.substr(pos + marker.size());
+      break;
+    }
   }
   std::string sanitized;
   for (char c : full_name) {
@@ -89,35 +95,19 @@ std::vector<std::string> GetWriteReadTestModels() {
       if (p.path().extension() == ext) {
         // generic format, so patterns containing '/' also match on Windows
         std::string xml = p.path().generic_string();
-        if (  // if file is meant to fail, skip it
+        if (  // intentional parse or compile failure tests
             absl::StrContains(xml, "malformed_") ||
             absl::StrContains(xml, "_fail") ||
-            // exclude files that are too slow to load
-            absl::StrContains(xml, "cow") || absl::StrContains(xml, "gmsh_") ||
-            absl::StrContains(xml, "shark_") ||
-            absl::StrContains(xml, "perf") ||
-            // exclude files that fail the comparison test
-            absl::StrContains(xml, "rfcamera") ||
-            absl::StrContains(xml, "tactile") ||
-            absl::StrContains(xml, "makemesh") ||
-            absl::StrContains(xml, "carousel") ||
-            absl::StrContains(xml, "many_dependencies") ||
-            absl::StrContains(xml, "usd") ||
-            absl::StrContains(xml, "torus_maxhull") ||
-            absl::StrContains(xml, "fitmesh_") ||
-            absl::StrContains(xml, "lengthrange") ||
-            absl::StrContains(xml, "hfield_xml") ||
-            absl::StrContains(xml, "fromto_convex") ||
-            absl::StrContains(xml, "cube_skin") ||
-            absl::StrContains(xml, "cube_3x3x3") ||
-            absl::StrContains(xml, "arch/gothic") ||
-            absl::StrContains(xml, "arch/roman") ||
-            absl::StrContains(xml, "welcome/welcome") ||
-            // flex_stiffness: stretch amplifies geometry XML rounds on save
-            absl::StrContains(xml, "flex/bag") ||
-            // exclude conflict test assets (designed to fail compile)
             absl::StrContains(xml, "xml/testdata/parent_") ||
-            // exclude mjz test data with VFS files
+            // large SDF, tetrahedral flex, or benchmark models too slow under
+            // sanitizers
+            absl::StrContains(xml, "cow") || absl::StrContains(xml, "shark_") ||
+            absl::StrContains(xml, "perf") ||
+            absl::StrContains(xml, "100_humanoids") ||
+            // USD assets (.usda) are not MJCF files
+            absl::StrContains(xml, "usd") ||
+            // references in-memory VFS files created only in specific unit
+            // tests
             absl::StrContains(xml, "mixed_test")) {
           continue;
         }
@@ -171,6 +161,7 @@ TEST_F(MjzEncoderTest, RootFileInArchiveIsNamedModelXml) {
   ASSERT_GT(nbytes, 0);
   ASSERT_THAT(resource.data, testing::NotNull());
 
+  // NOLINTBEGIN(misc-include-cleaner) - Disable clang-tidy for miniz.
   mz_zip_archive zip;
   std::memset(&zip, 0, sizeof(zip));
   ASSERT_TRUE(mz_zip_reader_init_mem(&zip, resource.data, nbytes, 0));
@@ -192,6 +183,7 @@ TEST_F(MjzEncoderTest, RootFileInArchiveIsNamedModelXml) {
 
   std::free(xml_data);
   mz_zip_reader_end(&zip);
+  // NOLINTEND(misc-include-cleaner) - End clang-tidy disable for miniz.
   std::free(resource.data);
   mj_deleteModel(model);
   mj_deleteSpec(spec);
@@ -852,12 +844,12 @@ static void EnsureFakeProviderRegistered() {
   static bool registered = false;
   if (registered) return;
   mjpResourceProvider provider = {};
-  mjp_defaultResourceProvider(&provider);
+  mjp_defaultProvider(&provider);
   provider.prefix = "testmjzenc";
   provider.open = FakeUriOpen;
   provider.read = FakeUriRead;
   provider.close = FakeUriClose;
-  mjp_registerResourceProvider(&provider);
+  mjp_registerProvider(&provider);
   registered = true;
 }
 
@@ -1201,6 +1193,7 @@ TEST_P(MjzEncoderParameterizedTest, WriteReadCompare) {
     reset_pathadr(model->skin_pathadr, model->nskin);
     reset_pathadr(model->hfield_pathadr, model->nhfield);
     reset_pathadr(model->tex_pathadr, model->ntex);
+    reset_pathadr(model->tex_contenttypeadr, model->ntex);
   }
 
   std::string field = "";
@@ -1390,6 +1383,181 @@ TEST_F(MjzEncoderTest, CubefileUriRewrite) {
   mj_deleteSpec(decoded);
   mj_deleteModel(model);
   mj_deleteSpec(spec);
+}
+
+TEST_F(MjzEncoderTest, RoundTripStrippathTrue) {
+  for (bool savecompiled : {false, true}) {
+    SCOPED_TRACE(savecompiled);
+    mjVFS vfs;
+    mj_defaultVFS(&vfs);
+    mj_addBufferVFS(&vfs, "box.obj", kBoxObj, std::strlen(kBoxObj));
+    mj_addBufferVFS(&vfs, "box$1.obj", kBoxObj, std::strlen(kBoxObj));
+
+    const char* xml = R"(
+      <mujoco model="strippath_test">
+        <compiler strippath="true"/>
+        <asset>
+          <mesh name="box" file="sub/box.obj"/>
+          <mesh name="sanitized_box" file="other/sub/box$1.obj"/>
+        </asset>
+        <worldbody>
+          <body name="body">
+            <geom type="mesh" mesh="box"/>
+            <geom type="mesh" mesh="sanitized_box"/>
+          </body>
+        </worldbody>
+      </mujoco>
+    )";
+
+    char error[1024] = {0};
+    mjSpec* spec = mj_parseXMLString(xml, &vfs, error, sizeof(error));
+    ASSERT_THAT(spec, testing::NotNull()) << error;
+    spec->compiler.savecompiled = savecompiled;
+
+    mjModel* model = mj_compile(spec, &vfs);
+    ASSERT_THAT(model, testing::NotNull()) << mjs_getError(spec);
+    EXPECT_EQ(model->nmesh, 2);
+
+    fs::path tmpdir = fs::path(testing::TempDir()) / "strippath_test";
+    fs::create_directories(tmpdir);
+    const std::string out_path = (tmpdir / "model.mjz").string();
+    int nbytes = mj_encode(spec, model, out_path.c_str(), nullptr, &vfs, error,
+                           sizeof(error));
+    ASSERT_GT(nbytes, 0) << error;
+
+    mjVFS decode_vfs;
+    mj_defaultVFS(&decode_vfs);
+    mjSpec* decoded =
+        mj_parse(out_path.c_str(), nullptr, &decode_vfs, error, sizeof(error));
+    ASSERT_THAT(decoded, testing::NotNull()) << error;
+
+    auto* san_mesh =
+        mjs_asMesh(mjs_findElement(decoded, mjOBJ_MESH, "sanitized_box"));
+    ASSERT_THAT(san_mesh, testing::NotNull());
+    EXPECT_STREQ(mjs_getString(san_mesh->file), "box_1.obj");
+
+    mjModel* decoded_model = mj_compile(decoded, &decode_vfs);
+    ASSERT_THAT(decoded_model, testing::NotNull()) << mjs_getError(decoded);
+    EXPECT_EQ(decoded_model->nmesh, 2);
+
+    mj_deleteVFS(&decode_vfs);
+    fs::remove_all(tmpdir);
+    mj_deleteModel(decoded_model);
+    mj_deleteSpec(decoded);
+    mj_deleteModel(model);
+    mj_deleteSpec(spec);
+    mj_deleteVFS(&vfs);
+  }
+}
+
+TEST_F(MjzEncoderTest, RoundTripStrippathCollidingSubdirAssets) {
+  static constexpr char kTetObj[] = R"(
+v 0 0 0
+v 1 0 0
+v 0 1 0
+v 0 0 1
+f 1 3 2
+f 1 2 4
+f 2 3 4
+f 3 1 4
+)";
+  static constexpr char kChildAXml[] = R"(
+    <mujoco model="child_a">
+      <compiler strippath="true"/>
+      <asset>
+        <mesh name="part" file="dir_a/part.obj"/>
+      </asset>
+      <worldbody>
+        <body name="body">
+          <geom type="mesh" mesh="part"/>
+        </body>
+      </worldbody>
+    </mujoco>
+  )";
+  static constexpr char kChildBXml[] = R"(
+    <mujoco model="child_b">
+      <compiler strippath="true"/>
+      <asset>
+        <mesh name="part" file="dir_b/part.obj"/>
+      </asset>
+      <worldbody>
+        <body name="body">
+          <geom type="mesh" mesh="part"/>
+        </body>
+      </worldbody>
+    </mujoco>
+  )";
+
+  for (bool savecompiled : {false, true}) {
+    SCOPED_TRACE(savecompiled);
+    const fs::path srcdir =
+        fs::path(testing::TempDir()) / "strippath_collision_src";
+    const fs::path tmpdir =
+        fs::path(testing::TempDir()) / "strippath_collision_out";
+    fs::remove_all(srcdir);
+    fs::create_directories(srcdir / "a");
+    fs::create_directories(srcdir / "b");
+    std::ofstream(srcdir / "a" / "child.xml") << kChildAXml;
+    std::ofstream(srcdir / "a" / "part.obj") << kBoxObj;
+    std::ofstream(srcdir / "b" / "child.xml") << kChildBXml;
+    std::ofstream(srcdir / "b" / "part.obj") << kTetObj;
+
+    char error[1024] = {0};
+    const std::string child_a_path = (srcdir / "a" / "child.xml").string();
+    const std::string child_b_path = (srcdir / "b" / "child.xml").string();
+    mjSpec* child_a =
+        mj_parseXML(child_a_path.c_str(), nullptr, error, sizeof(error));
+    ASSERT_THAT(child_a, testing::NotNull()) << error;
+    mjSpec* child_b =
+        mj_parseXML(child_b_path.c_str(), nullptr, error, sizeof(error));
+    ASSERT_THAT(child_b, testing::NotNull()) << error;
+
+    mjSpec* parent = mj_makeSpec();
+    parent->strippath = true;
+    parent->compiler.savecompiled = savecompiled;
+    mjsBody* world = mjs_findBody(parent, "world");
+
+    mjsFrame* frame_a = mjs_addFrame(world, nullptr);
+    mjs_attach(frame_a->element, mjs_findBody(child_a, "body")->element, "a_",
+               "");
+    mjsFrame* frame_b = mjs_addFrame(world, nullptr);
+    mjs_attach(frame_b->element, mjs_findBody(child_b, "body")->element, "b_",
+               "");
+
+    mjModel* model = mj_compile(parent, nullptr);
+    ASSERT_THAT(model, testing::NotNull()) << mjs_getError(parent);
+    ASSERT_EQ(model->nmesh, 2);
+    EXPECT_EQ(model->mesh_vertnum[0], 8);
+    EXPECT_EQ(model->mesh_vertnum[1], 4);
+
+    fs::create_directories(tmpdir);
+    const std::string out_path = (tmpdir / "model.mjz").string();
+    int nbytes = mj_encode(parent, model, out_path.c_str(), nullptr, nullptr,
+                           error, sizeof(error));
+    ASSERT_GT(nbytes, 0) << error;
+    fs::remove_all(srcdir);
+
+    mjVFS decode_vfs;
+    mj_defaultVFS(&decode_vfs);
+    mjSpec* decoded =
+        mj_parse(out_path.c_str(), nullptr, &decode_vfs, error, sizeof(error));
+    ASSERT_THAT(decoded, testing::NotNull()) << error;
+
+    mjModel* decoded_model = mj_compile(decoded, &decode_vfs);
+    ASSERT_THAT(decoded_model, testing::NotNull()) << mjs_getError(decoded);
+    ASSERT_EQ(decoded_model->nmesh, 2);
+    EXPECT_EQ(decoded_model->mesh_vertnum[0], 8);
+    EXPECT_EQ(decoded_model->mesh_vertnum[1], 4);
+
+    mj_deleteVFS(&decode_vfs);
+    fs::remove_all(tmpdir);
+    mj_deleteModel(decoded_model);
+    mj_deleteSpec(decoded);
+    mj_deleteModel(model);
+    mj_deleteSpec(parent);
+    mj_deleteSpec(child_a);
+    mj_deleteSpec(child_b);
+  }
 }
 
 }  // namespace mujoco

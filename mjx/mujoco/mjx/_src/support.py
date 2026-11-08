@@ -87,12 +87,12 @@ def full_m(m: Model, d: Data) -> jax.Array:
   """Reconstitute dense mass matrix from M."""
 
   if not is_sparse(m):
-    return d._impl.M  # pytype: disable=attribute-error
+    return d._impl.M  # pyrefly: ignore[missing-attribute]
 
   i = np.repeat(np.arange(m.nv), m.M_rownnz)
   j = m.M_colind
 
-  mat = jp.zeros((m.nv, m.nv)).at[(i, j)].set(d._impl.M)  # pytype: disable=attribute-error
+  mat = jp.zeros((m.nv, m.nv)).at[(i, j)].set(d._impl.M)  # pyrefly: ignore[missing-attribute]
 
   # also set upper triangular
   mat = mat + jp.tril(mat, -1).T
@@ -104,10 +104,10 @@ def mul_m(m: Model, d: Data, vec: jax.Array) -> jax.Array:
   """Multiply vector by inertia matrix."""
 
   if not is_sparse(m):
-    return d._impl.M @ vec  # pytype: disable=attribute-error
+    return d._impl.M @ vec  # pyrefly: ignore[missing-attribute]
 
   diag_adr = m.M_rowadr + m.M_rownnz - 1
-  diag_mul = d._impl.M[diag_adr] * vec  # pytype: disable=attribute-error
+  diag_mul = d._impl.M[diag_adr] * vec  # pyrefly: ignore[missing-attribute]
 
   is_, js, madr_ijs = [], [], []
   for i in range(m.nv):
@@ -119,8 +119,8 @@ def mul_m(m: Model, d: Data, vec: jax.Array) -> jax.Array:
 
   i, j, madr_ij = (np.array(x, dtype=np.int32) for x in (is_, js, madr_ijs))
 
-  out = diag_mul.at[i].add(d._impl.M[madr_ij] * vec[j])  # pytype: disable=attribute-error
-  out = out.at[j].add(d._impl.M[madr_ij] * vec[i])  # pytype: disable=attribute-error
+  out = diag_mul.at[i].add(d._impl.M[madr_ij] * vec[j])  # pyrefly: ignore[missing-attribute]
+  out = out.at[j].add(d._impl.M[madr_ij] * vec[i])  # pyrefly: ignore[missing-attribute]
 
   return out
 
@@ -136,9 +136,9 @@ def jac(
   mask = mask[jp.array(m.dof_bodyid)] > 0
 
   offset = point - d.subtree_com[jp.array(m.body_rootid)[body_id]]
-  jacp = jax.vmap(lambda a, b=offset: a[3:] + jp.cross(a[:3], b))(d.cdof)  # pytype: disable=attribute-error
+  jacp = jax.vmap(lambda a, b=offset: a[3:] + jp.cross(a[:3], b))(d.cdof)
   jacp = jax.vmap(jp.multiply)(jacp, mask)
-  jacr = jax.vmap(jp.multiply)(d.cdof[:, :3], mask)  # pytype: disable=attribute-error
+  jacr = jax.vmap(jp.multiply)(d.cdof[:, :3], mask)
 
   return jacp, jacr
 
@@ -174,7 +174,7 @@ def jac_dot(
       lambda a, b: a[3:] + jp.cross(a[:3], offset) + jp.cross(b[:3], pvel_lin)
   )(cdof_dot, cdof)
   jacp = jax.vmap(jp.multiply)(jacp, mask)
-  jacr = jax.vmap(jp.multiply)(cdof_dot[:, :3], mask)  # pytype: disable=attribute-error
+  jacr = jax.vmap(jp.multiply)(cdof_dot[:, :3], mask)
 
   return jacp, jacr
 
@@ -595,20 +595,20 @@ def contact_force(
     m: Model, d: Data, contact_id: int, to_world_frame: bool = False
 ) -> jax.Array:
   """Extract 6D force:torque for one contact, in contact frame by default."""
-  efc_address = d._impl.contact.efc_address[contact_id]  # pytype: disable=attribute-error
-  condim = d._impl.contact.dim[contact_id]  # pytype: disable=attribute-error
+  efc_address = d._impl.contact.efc_address[contact_id]  # pyrefly: ignore[missing-attribute]
+  condim = d._impl.contact.dim[contact_id]  # pyrefly: ignore[missing-attribute]
   if m.opt.cone == ConeType.PYRAMIDAL:
     force = _decode_pyramid(
-        d._impl.efc_force[efc_address:], d._impl.contact.friction[contact_id], condim  # pytype: disable=attribute-error
+        d._impl.efc_force[efc_address:], d._impl.contact.friction[contact_id], condim  # pyrefly: ignore[missing-attribute]
     )
   elif m.opt.cone == ConeType.ELLIPTIC:
-    force = d._impl.efc_force[efc_address : efc_address + condim]  # pytype: disable=attribute-error
+    force = d._impl.efc_force[efc_address : efc_address + condim]  # pyrefly: ignore[missing-attribute]
     force = jp.concatenate([force, jp.zeros((6 - condim))])
   else:
     raise ValueError(f'Unknown cone type: {m.opt.cone}')
 
   if to_world_frame:
-    force = force.reshape((-1, 3)) @ d._impl.contact.frame[contact_id]  # pytype: disable=attribute-error
+    force = force.reshape((-1, 3)) @ d._impl.contact.frame[contact_id]  # pyrefly: ignore[missing-attribute]
     force = force.reshape(-1)
 
   return force * (efc_address >= 0)
@@ -619,21 +619,21 @@ def contact_force_dim(
 ) -> Tuple[jax.Array, np.ndarray]:
   """Extract 6D force:torque for contacts with dimension dim."""
   # valid contact and condim indices
-  idx_dim = (d._impl.contact.efc_address >= 0) & (d._impl.contact.dim == dim)  # pytype: disable=attribute-error
+  idx_dim = (d._impl.contact.efc_address >= 0) & (d._impl.contact.dim == dim)  # pyrefly: ignore[missing-attribute]
 
   # contact force from efc
   if m.opt.cone == ConeType.PYRAMIDAL:
     efc_address = (
-        d._impl.contact.efc_address[idx_dim, None]  # pytype: disable=attribute-error
+        d._impl.contact.efc_address[idx_dim, None]  # pyrefly: ignore[missing-attribute]
         + np.arange(np.where(dim == 1, 1, 2 * (dim - 1)))[None]  # pyrefly: ignore[no-matching-overload]
     )
-    efc_force = d._impl.efc_force[efc_address]  # pytype: disable=attribute-error
+    efc_force = d._impl.efc_force[efc_address]  # pyrefly: ignore[missing-attribute]
     force = jax.vmap(_decode_pyramid, in_axes=(0, 0, None))(
-        efc_force, d._impl.contact.friction[idx_dim], dim  # pytype: disable=attribute-error
+        efc_force, d._impl.contact.friction[idx_dim], dim  # pyrefly: ignore[missing-attribute]
     )
   elif m.opt.cone == ConeType.ELLIPTIC:
-    efc_address = d._impl.contact.efc_address[idx_dim, None] + np.arange(dim)[None]  # pytype: disable=attribute-error
-    force = d._impl.efc_force[efc_address]  # pytype: disable=attribute-error
+    efc_address = d._impl.contact.efc_address[idx_dim, None] + np.arange(dim)[None]  # pyrefly: ignore[missing-attribute]
+    force = d._impl.efc_force[efc_address]  # pyrefly: ignore[missing-attribute]
     force = jp.hstack([force, jp.zeros((force.shape[0], 6 - dim))])
   else:
     raise ValueError(f'Unknown cone type: {m.opt.cone}.')
@@ -682,6 +682,11 @@ def _is_intersect(
   )
 
 
+def _winding_angle(p: jax.Array, q: jax.Array) -> jax.Array:
+  """Signed angle swept from p to q around the origin, in (-pi, pi]."""
+  return jp.arctan2(p[0] * q[1] - p[1] * q[0], p[0] * q[0] + p[1] * q[1])
+
+
 def wrap_circle(
     d: jax.Array, sd: jax.Array, sidesite: jax.Array, rad: jax.Array
 ) -> Tuple[jax.Array, jax.Array]:
@@ -702,9 +707,16 @@ def wrap_circle(
   circle_too_small = rad < mujoco.mjMINVAL
   points_too_close = dd < mujoco.mjMINVAL
 
-  intersect_and_side = (seg[0] ** 2 + seg[1] ** 2 > sqrad) & (
-      jp.where(sidesite, 0, 1) | (jp.dot(sd, seg) >= 0)
-  )
+  # check for intersection
+  clear = (seg[0] ** 2 + seg[1] ** 2) > sqrad
+
+  # side: the path is homotopic to the polyline d0 -> sd -> d1, whose winding
+  # angle around the center determines the wrap orientation; the segment
+  # d0 -> d1 is in the same homotopy class iff its winding angle is the same
+  # (they differ by multiples of 2*pi)
+  wside = _winding_angle(d[:2], sd) + _winding_angle(sd, d[2:])
+  wline = _winding_angle(d[:2], d[2:])
+  straight = jp.where(sidesite, clear & (jp.abs(wside - wline) < jp.pi), clear)
 
   # construct the two solutions, compute goodness
   def _sol(sgn):
@@ -726,15 +738,9 @@ def wrap_circle(
 
     sol = jp.array([[d00, d01], [d10, d11]])
 
-    # goodness: close to sd, or shorter path
-    tmp0 = sol[0] + sol[1]
-    tmp0 = math.normalize(tmp0).reshape(-1)
-    good0 = jp.dot(tmp0, sd)
-
-    tmp1 = (sol[0] - sol[1]).reshape(-1)
-    good1 = -jp.dot(tmp1, tmp1)
-
-    good = jp.where(sidesite, good0, good1)
+    # goodness: shorter path
+    tmp = (sol[0] - sol[1]).reshape(-1)
+    good = -jp.dot(tmp, tmp)
 
     # penalize for intersection
     intersect = _is_intersect(d[:2], sol[0], d[2:], sol[1])
@@ -744,16 +750,22 @@ def wrap_circle(
 
   sol, good = jax.vmap(_sol)(jp.array([1, -1]))
 
-  # select the better solution
-  i = jp.argmax(good)
+  # select the solution: with side, by orientation (i=1 is counterclockwise),
+  # otherwise the better
+  i = jp.where(sidesite, wside > 0, good[0] <= good[1]).astype(int)
+  i = i.reshape(())
   sol = sol[i]
   pnt = sol.reshape(-1)
 
   # check for intersection
   intersect = _is_intersect(d[:2], pnt[:2], d[2:], pnt[2:])
 
-  # compute curve length
-  wlen = _length_circle(sol[0], sol[1], i, rad)
+  # compute curve length; side: the path winds like the polyline, so the arc
+  # angle is its winding minus that of the tangent segments
+  arc = wside - _winding_angle(d[:2], sol[0]) - _winding_angle(sol[1], d[2:])
+  wlen = jp.where(
+      sidesite, rad * jp.abs(arc), _length_circle(sol[0], sol[1], i, rad)
+  )
 
   # check cases
   invalid = (
@@ -761,7 +773,7 @@ def wrap_circle(
       | point_inside1
       | circle_too_small
       | points_too_close
-      | intersect_and_side
+      | straight
       | intersect
   )
 
@@ -958,7 +970,8 @@ def wrap(
   # compute sidesite projection
   s = xmat.T @ (side - xpos)
   sd = jp.array([jp.dot(s, axis0), jp.dot(s, axis1)])
-  sd = math.normalize(sd) * size
+  sd, sdnrm = math.normalize_with_norm(sd)
+  sd = jp.where(sdnrm < mujoco.mjMINVAL, jp.array([1.0, 0.0]), sd) * size
 
   if is_wrap_inside:
     wlen, pnt = wrap_inside(
@@ -1116,10 +1129,8 @@ def muscle_dynamics_timescale(
     # sigmoid function over 0 <= x <= 1 using quintic polynomial
     # sigmoid: f(x) = 6 * x^5 - 15 * x^4 + 10 * x^3
     # solution of f(0) = f'(0) = f''(0) = 0, f(1) = 1, f'(1) = f''(1) = 0
-    sol = x * x * x * (3 * x * (2 * x - 5) + 10)
-    sol = jp.where(x <= 0, 0, sol)
-    sol = jp.where(x >= 1, 1, sol)
-    return sol
+    x = jp.clip(x, 0, 1)
+    return x * x * x * (3 * x * (2 * x - 5) + 10)
 
   # smooth switching
   # scale by width, center around 0.5 midpoint, rescale to bounds

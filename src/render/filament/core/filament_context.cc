@@ -83,6 +83,7 @@ FilamentContext::FilamentContext(const mjrfContextConfig* config)
 }
 
 FilamentContext::~FilamentContext() {
+  engine_->flushAndWait();
   material_manager_.reset();
   object_manager_.reset();
   engine_->destroy(renderer_);
@@ -93,7 +94,7 @@ FilamentContext::~FilamentContext() {
 
 mjrfFrameHandle FilamentContext::Render(
     std::span<const mjrfRenderRequest> requests,
-    std::span<const mjrfReadPixelsRequest> read_requests) {
+    std::span<const mjrfReadRequest> read_requests) {
   if (read_requests.size() > 1) {
     mju_error("Only one read request is supported for now.");
   }
@@ -101,6 +102,7 @@ mjrfFrameHandle FilamentContext::Render(
   if constexpr (UTILS_HAS_THREADING) {
     // Wait until previous frame is completed before requesting a new frame.
     engine_->flushAndWait();
+    completed_frame_ = frame_counter_;
   }
 
   ValidateSwapChains(requests);
@@ -148,7 +150,7 @@ mjrfFrameHandle FilamentContext::Render(
             "pointless.");
       }
 
-      const mjrfReadPixelsRequest& read_request = read_requests[0];
+      const mjrfReadRequest& read_request = read_requests[0];
       if (read_request.num_bytes == 0) {
         mju_error("Output buffer size is zero.");
       }
@@ -176,20 +178,28 @@ mjrfFrameHandle FilamentContext::Render(
     engine_->execute();
   }
 
+  const mjrfFrameHandle frame = ++frame_counter_;
   if (!read_requests.empty()) {
     engine_->flushAndWait();
+    completed_frame_ = frame;
     if (read_requests[0].read_completed) {
       read_requests[0].read_completed(read_requests[0].user_data);
     }
   }
 
-  return ++frame_counter_;
+  return frame;
 }
 
 void FilamentContext::WaitForFrame(mjrfFrameHandle frame_handle) {
-  if (frame_counter_ < frame_handle) {
+  if (completed_frame_ < frame_handle) {
     engine_->flushAndWait();
+    completed_frame_ = frame_counter_;
   }
+}
+
+void FilamentContext::Flush() {
+  engine_->flush();
+  engine_->pumpMessageQueues();
 }
 
 void FilamentContext::SetClearColor(const filament::math::float4& color) {

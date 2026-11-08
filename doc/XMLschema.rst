@@ -191,6 +191,9 @@
             .. grid-item::
                :ref:`ipc<option-flag-ipc>`
 
+            .. grid-item::
+               :ref:`speculative<option-flag-speculative>`
+
 
    .. dropdown:: :ref:`compiler<compiler>` |*|
 
@@ -252,6 +255,12 @@
             :ref:`saveinertial<compiler-saveinertial>`
 
          .. grid-item::
+            :ref:`savecompiled<compiler-savecompiled>`
+
+         .. grid-item::
+            :ref:`savecanonical<compiler-savecanonical>`
+
+         .. grid-item::
             :ref:`assetdir<compiler-assetdir>`
 
          .. grid-item::
@@ -259,6 +268,9 @@
 
          .. grid-item::
             :ref:`conflict<compiler-conflict>`
+
+         .. grid-item::
+            :ref:`passthrough<compiler-passthrough>`
 
 
       .. dropdown:: :ref:`lengthrange<compiler-lengthrange>` :octicon:`dot`
@@ -540,6 +552,9 @@
                :ref:`name<asset-texture-name>`
 
             .. grid-item::
+               :ref:`class<asset-texture-class>`
+
+            .. grid-item::
                :ref:`type<asset-texture-type>`
 
             .. grid-item::
@@ -607,6 +622,9 @@
 
             .. grid-item::
                :ref:`nchannel<asset-texture-nchannel>`
+
+            .. grid-item::
+               :ref:`embed<asset-texture-embed>`
 
 
       .. dropdown:: :ref:`material<asset-material>` |*|
@@ -720,6 +738,9 @@
             :ref:`simple<body-simple>`
 
          .. grid-item::
+            :ref:`fuse<body-fuse>`
+
+         .. grid-item::
             :ref:`user<body-user>`
 
 
@@ -820,6 +841,9 @@
 
             .. grid-item::
                :ref:`springref<body-joint-springref>`
+
+            .. grid-item::
+               :ref:`springyield<body-joint-springyield>`
 
             .. grid-item::
                :ref:`armature<body-joint-armature>`
@@ -949,6 +973,9 @@
 
             .. grid-item::
                :ref:`rgba<body-geom-rgba>`
+
+            .. grid-item::
+               :ref:`castshadow<body-geom-castshadow>`
 
             .. grid-item::
                :ref:`fluidshape<body-geom-fluidshape>`
@@ -1218,228 +1245,6 @@
                   :ref:`value<plugin-config-value>`
 
 
-      .. dropdown:: :ref:`composite<body-composite>` |*|
-
-         .. grid:: 2 3 4 4
-            :gutter: 0
-
-            .. grid-item::
-               :ref:`prefix<body-composite-prefix>`
-
-            .. grid-item::
-               :ref:`type<body-composite-type>`
-
-            .. grid-item::
-               :ref:`count<body-composite-count>`
-
-            .. grid-item::
-               :ref:`offset<body-composite-offset>`
-
-            .. grid-item::
-               :ref:`vertex<body-composite-vertex>`
-
-            .. grid-item::
-               :ref:`initial<body-composite-initial>`
-
-            .. grid-item::
-               :ref:`curve<body-composite-curve>`
-
-            .. grid-item::
-               :ref:`size<body-composite-size>`
-
-            .. grid-item::
-               :ref:`quat<body-composite-quat>`
-
-
-         .. dropdown:: :ref:`joint<composite-joint>` |*|
-
-            .. grid:: 2 3 4 4
-               :gutter: 0
-
-               .. grid-item::
-                  :ref:`kind<composite-joint-kind>`
-
-               .. grid-item::
-                  :ref:`group<composite-joint-group>`
-
-               .. grid-item::
-                  :ref:`stiffness<composite-joint-stiffness>`
-
-               .. grid-item::
-                  :ref:`damping<composite-joint-damping>`
-
-               .. grid-item::
-                  :ref:`armature<composite-joint-armature>`
-
-               .. grid-item::
-                  :ref:`solreffix<composite-joint-solreffix>`
-
-               .. grid-item::
-                  :ref:`solimpfix<composite-joint-solimpfix>`
-
-               .. grid-item::
-                  :ref:`type<composite-joint-type>`
-
-               .. grid-item::
-                  :ref:`axis<composite-joint-axis>`
-
-               .. grid-item::
-                  :ref:`limited<composite-joint-limited>`
-
-               .. grid-item::
-                  :ref:`range<composite-joint-range>`
-
-               .. grid-item::
-                  :ref:`margin<composite-joint-margin>`
-
-               .. grid-item::
-                  :ref:`solreflimit<composite-joint-solreflimit>`
-
-               .. grid-item::
-                  :ref:`solimplimit<composite-joint-solimplimit>`
-
-               .. grid-item::
-                  :ref:`frictionloss<composite-joint-frictionloss>`
-
-               .. grid-item::
-                  :ref:`solreffriction<composite-joint-solreffriction>`
-
-               .. grid-item::
-                  :ref:`solimpfriction<composite-joint-solimpfriction>`
-
-
-         .. dropdown:: :ref:`skin<composite-skin>` :octicon:`dot`
-
-            .. grid:: 2 3 4 4
-               :gutter: 0
-
-               .. grid-item::
-                  :ref:`texcoord<composite-skin-texcoord>`
-
-               .. grid-item::
-                  :ref:`material<composite-skin-material>`
-
-               .. grid-item::
-                  :ref:`group<composite-skin-group>`
-
-               .. grid-item::
-                  :ref:`rgba<composite-skin-rgba>`
-
-               .. grid-item::
-                  :ref:`inflate<composite-skin-inflate>`
-
-               .. grid-item::
-                  :ref:`subgrid<composite-skin-subgrid>`
-
-
-         .. dropdown:: :ref:`geom<composite-geom>` :octicon:`dot`
-
-            .. grid:: 2 3 4 4
-               :gutter: 0
-
-               .. grid-item::
-                  :ref:`type<composite-geom-type>`
-
-               .. grid-item::
-                  :ref:`contype<composite-geom-contype>`
-
-               .. grid-item::
-                  :ref:`conaffinity<composite-geom-conaffinity>`
-
-               .. grid-item::
-                  :ref:`condim<composite-geom-condim>`
-
-               .. grid-item::
-                  :ref:`group<composite-geom-group>`
-
-               .. grid-item::
-                  :ref:`priority<composite-geom-priority>`
-
-               .. grid-item::
-                  :ref:`size<composite-geom-size>`
-
-               .. grid-item::
-                  :ref:`material<composite-geom-material>`
-
-               .. grid-item::
-                  :ref:`rgba<composite-geom-rgba>`
-
-               .. grid-item::
-                  :ref:`friction<composite-geom-friction>`
-
-               .. grid-item::
-                  :ref:`mass<composite-geom-mass>`
-
-               .. grid-item::
-                  :ref:`density<composite-geom-density>`
-
-               .. grid-item::
-                  :ref:`solmix<composite-geom-solmix>`
-
-               .. grid-item::
-                  :ref:`solref<composite-geom-solref>`
-
-               .. grid-item::
-                  :ref:`solimp<composite-geom-solimp>`
-
-               .. grid-item::
-                  :ref:`margin<composite-geom-margin>`
-
-               .. grid-item::
-                  :ref:`gap<composite-geom-gap>`
-
-               .. grid-item::
-                  :ref:`surfacevel<composite-geom-surfacevel>`
-
-               .. grid-item::
-                  :ref:`adhesion<composite-geom-adhesion>`
-
-
-         .. dropdown:: :ref:`site<composite-site>` :octicon:`dot`
-
-            .. grid:: 2 3 4 4
-               :gutter: 0
-
-               .. grid-item::
-                  :ref:`group<composite-site-group>`
-
-               .. grid-item::
-                  :ref:`size<composite-site-size>`
-
-               .. grid-item::
-                  :ref:`material<composite-site-material>`
-
-               .. grid-item::
-                  :ref:`rgba<composite-site-rgba>`
-
-               .. grid-item::
-                  :ref:`mesh<composite-site-mesh>`
-
-
-         .. dropdown:: :ref:`plugin<composite-plugin>` |*|
-
-            .. grid:: 2 3 4 4
-               :gutter: 0
-
-               .. grid-item::
-                  :ref:`plugin<composite-plugin-plugin>`
-
-               .. grid-item::
-                  :ref:`instance<composite-plugin-instance>`
-
-
-            .. dropdown:: :ref:`config<plugin-config>` |*|
-
-               .. grid:: 2 3 4 4
-                  :gutter: 0
-
-                  .. grid-item::
-                     :ref:`key<plugin-config-key>`
-
-                  .. grid-item::
-                     :ref:`value<plugin-config-value>`
-
-
       .. dropdown:: :ref:`flexcomp<body-flexcomp>` |*|
 
          .. grid:: 2 3 4 4
@@ -1486,6 +1291,9 @@
 
             .. grid-item::
                :ref:`file<body-flexcomp-file>`
+
+            .. grid-item::
+               :ref:`mesh<body-flexcomp-mesh>`
 
             .. grid-item::
                :ref:`point<body-flexcomp-point>`
@@ -1560,13 +1368,25 @@
                   :ref:`poisson<flexcomp-elasticity-poisson>`
 
                .. grid-item::
+                  :ref:`shear<flexcomp-elasticity-shear>`
+
+               .. grid-item::
                   :ref:`damping<flexcomp-elasticity-damping>`
 
                .. grid-item::
                   :ref:`thickness<flexcomp-elasticity-thickness>`
 
                .. grid-item::
+                  :ref:`yield<flexcomp-elasticity-yield>`
+
+               .. grid-item::
                   :ref:`elastic2d<flexcomp-elasticity-elastic2d>`
+
+               .. grid-item::
+                  :ref:`section<flexcomp-elasticity-section>`
+
+               .. grid-item::
+                  :ref:`sectionsize<flexcomp-elasticity-sectionsize>`
 
 
          .. dropdown:: :ref:`contact<flexcomp-contact>` :octicon:`dot`
@@ -1782,13 +1602,25 @@
                   :ref:`poisson<flex-elasticity-poisson>`
 
                .. grid-item::
+                  :ref:`shear<flex-elasticity-shear>`
+
+               .. grid-item::
                   :ref:`damping<flex-elasticity-damping>`
 
                .. grid-item::
                   :ref:`thickness<flex-elasticity-thickness>`
 
                .. grid-item::
+                  :ref:`yield<flex-elasticity-yield>`
+
+               .. grid-item::
                   :ref:`elastic2d<flex-elasticity-elastic2d>`
+
+               .. grid-item::
+                  :ref:`section<flex-elasticity-section>`
+
+               .. grid-item::
+                  :ref:`sectionsize<flex-elasticity-sectionsize>`
 
 
       .. dropdown:: :ref:`skin<deformable-skin>` |*|
@@ -2070,30 +1902,6 @@
                :ref:`flex<equality-flex-flex>`
 
 
-      .. dropdown:: :ref:`flexvert<equality-flexvert>` |*|
-
-         .. grid:: 2 3 4 4
-            :gutter: 0
-
-            .. grid-item::
-               :ref:`name<equality-flexvert-name>`
-
-            .. grid-item::
-               :ref:`class<equality-flexvert-class>`
-
-            .. grid-item::
-               :ref:`active<equality-flexvert-active>`
-
-            .. grid-item::
-               :ref:`solref<equality-flexvert-solref>`
-
-            .. grid-item::
-               :ref:`solimp<equality-flexvert-solimp>`
-
-            .. grid-item::
-               :ref:`flex<equality-flexvert-flex>`
-
-
       .. dropdown:: :ref:`flexstrain<equality-flexstrain>` |*|
 
          .. grid:: 2 3 4 4
@@ -2167,6 +1975,9 @@
 
             .. grid-item::
                :ref:`springlength<tendon-spatial-springlength>`
+
+            .. grid-item::
+               :ref:`springyield<tendon-spatial-springyield>`
 
             .. grid-item::
                :ref:`width<tendon-spatial-width>`
@@ -2266,6 +2077,9 @@
 
             .. grid-item::
                :ref:`springlength<tendon-fixed-springlength>`
+
+            .. grid-item::
+               :ref:`springyield<tendon-fixed-springyield>`
 
             .. grid-item::
                :ref:`margin<tendon-fixed-margin>`
@@ -2392,6 +2206,9 @@
 
             .. grid-item::
                :ref:`ffrange<actuator-general-ffrange>`
+
+            .. grid-item::
+               :ref:`inheritrange<actuator-general-inheritrange>`
 
             .. grid-item::
                :ref:`dyntype<actuator-general-dyntype>`
@@ -5222,6 +5039,9 @@
             .. grid-item::
                :ref:`ctrl<keyframe-key-ctrl>`
 
+            .. grid-item::
+               :ref:`plastic<keyframe-key-plastic>`
+
 
    .. dropdown:: :ref:`visual<visual>` |*|
 
@@ -5517,6 +5337,60 @@
                :ref:`inertia<default-mesh-inertia>`
 
 
+      .. dropdown:: :ref:`texture<default-texture>` :octicon:`dot`
+
+         .. grid:: 2 3 4 4
+            :gutter: 0
+
+            .. grid-item::
+               :ref:`type<default-texture-type>`
+
+            .. grid-item::
+               :ref:`colorspace<default-texture-colorspace>`
+
+            .. grid-item::
+               :ref:`gridsize<default-texture-gridsize>`
+
+            .. grid-item::
+               :ref:`gridlayout<default-texture-gridlayout>`
+
+            .. grid-item::
+               :ref:`builtin<default-texture-builtin>`
+
+            .. grid-item::
+               :ref:`rgb1<default-texture-rgb1>`
+
+            .. grid-item::
+               :ref:`rgb2<default-texture-rgb2>`
+
+            .. grid-item::
+               :ref:`mark<default-texture-mark>`
+
+            .. grid-item::
+               :ref:`markrgb<default-texture-markrgb>`
+
+            .. grid-item::
+               :ref:`random<default-texture-random>`
+
+            .. grid-item::
+               :ref:`width<default-texture-width>`
+
+            .. grid-item::
+               :ref:`height<default-texture-height>`
+
+            .. grid-item::
+               :ref:`hflip<default-texture-hflip>`
+
+            .. grid-item::
+               :ref:`vflip<default-texture-vflip>`
+
+            .. grid-item::
+               :ref:`nchannel<default-texture-nchannel>`
+
+            .. grid-item::
+               :ref:`embed<default-texture-embed>`
+
+
       .. dropdown:: :ref:`material<default-material>` :octicon:`dot`
 
          .. grid:: 2 3 4 4
@@ -5625,6 +5499,9 @@
                :ref:`springref<default-joint-springref>`
 
             .. grid-item::
+               :ref:`springyield<default-joint-springyield>`
+
+            .. grid-item::
                :ref:`armature<default-joint-armature>`
 
             .. grid-item::
@@ -5731,6 +5608,9 @@
 
             .. grid-item::
                :ref:`rgba<default-geom-rgba>`
+
+            .. grid-item::
+               :ref:`castshadow<default-geom-castshadow>`
 
             .. grid-item::
                :ref:`fluidshape<default-geom-fluidshape>`
@@ -5964,7 +5844,13 @@
                :ref:`limited<default-tendon-limited>`
 
             .. grid-item::
+               :ref:`actuatorfrclimited<default-tendon-actuatorfrclimited>`
+
+            .. grid-item::
                :ref:`range<default-tendon-range>`
+
+            .. grid-item::
+               :ref:`actuatorfrcrange<default-tendon-actuatorfrcrange>`
 
             .. grid-item::
                :ref:`solreflimit<default-tendon-solreflimit>`
@@ -5985,6 +5871,9 @@
                :ref:`springlength<default-tendon-springlength>`
 
             .. grid-item::
+               :ref:`springyield<default-tendon-springyield>`
+
+            .. grid-item::
                :ref:`width<default-tendon-width>`
 
             .. grid-item::
@@ -5998,6 +5887,9 @@
 
             .. grid-item::
                :ref:`damping<default-tendon-damping>`
+
+            .. grid-item::
+               :ref:`armature<default-tendon-armature>`
 
             .. grid-item::
                :ref:`rgba<default-tendon-rgba>`
@@ -6067,6 +5959,9 @@
 
             .. grid-item::
                :ref:`ffrange<default-general-ffrange>`
+
+            .. grid-item::
+               :ref:`inheritrange<default-general-inheritrange>`
 
             .. grid-item::
                :ref:`dyntype<default-general-dyntype>`

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -19,7 +20,7 @@
 #include <mujoco/mjrfilament.h>
 #include <mujoco/mujoco.h>
 #include "experimental/filament/compat/scene_bridge.h"
-#include "render/filament/mjrfilament_cpp.h"
+#include "render/filament/support/mjrf_ptr.h"
 
 // This library implements the entirety of mujoco's mjr API. You can link this
 // library with your application (instead of the "classic" mujoco renderer) to
@@ -39,11 +40,12 @@ class CompatContext {
 
   void Render(const mjrRect& viewport, const mjvScene* scene);
 
-  void ReadPixels(mjrRect viewport, unsigned char* rgb, float* depth);
+  void ReadPixels(mjrRect viewport, unsigned char* rgb, float* depth,
+                  int depth_map);
 
   // The headlight is a render request option; fill it in from the bridge.
   void SetHeadlight(mjrfRenderRequest* req) const {
-    req->enable_headlight = scene_bridge_->IsHeadlightEnabled();
+    req->headlight = scene_bridge_->IsHeadlightEnabled();
     const float* color = scene_bridge_->GetHeadlightColor();
     req->headlight_color[0] = color[0];
     req->headlight_color[1] = color[1];
@@ -71,6 +73,8 @@ class CompatContext {
 
  private:
   mjrDrawMode draw_mode_ = mjDRAW_MODE_DEFAULT;
+  bool skybox_ = true;
+  bool haze_ = true;
   UniquePtr<mjrfContext> context_{nullptr, nullptr};
   UniquePtr<mjrfScene> scene_{nullptr, nullptr};
   std::unique_ptr<SceneBridge> scene_bridge_;
@@ -103,12 +107,16 @@ void CompatContext::Render(const mjrRect& viewport, const mjvScene* scene) {
   } else {
     draw_mode_ = mjDRAW_MODE_DEFAULT;
   }
+  skybox_ = draw_mode_ == mjDRAW_MODE_DEFAULT && scene->flags[mjRND_SKYBOX];
+  haze_ = draw_mode_ == mjDRAW_MODE_DEFAULT && scene->flags[mjRND_HAZE];
 
   if (framebuffer_ == mjFB_WINDOW) {
     mjrfRenderRequest req;
     mjrf_defaultRenderRequest(&req);
     req.scene = scene_.get();
     req.draw_mode = draw_mode_;
+    req.skybox = skybox_;
+    req.haze = haze_;
     req.camera = scene_bridge_->GetCamera();
     req.viewport = viewport;
     SetHeadlight(&req);
@@ -117,7 +125,7 @@ void CompatContext::Render(const mjrRect& viewport, const mjvScene* scene) {
 }
 
 void CompatContext::ReadPixels(mjrRect viewport, unsigned char* rgb,
-                               float* depth) {
+                               float* depth, int depth_map) {
   if (framebuffer_ == mjFB_WINDOW) {
     mju_error("ReadPixels is only supported for offscreen rendering.");
   }
@@ -139,13 +147,15 @@ void CompatContext::ReadPixels(mjrRect viewport, unsigned char* rgb,
     mjrf_defaultRenderRequest(&req);
     req.scene = scene_.get();
     req.draw_mode = draw_mode_;
+    req.skybox = skybox_;
+    req.haze = haze_;
     req.camera = scene_bridge_->GetCamera();
     req.viewport = viewport;
     req.target = color_target_.get();
     SetHeadlight(&req);
 
-    mjrfReadPixelsRequest read_req;
-    mjrf_defaultReadPixelsRequest(&read_req);
+    mjrfReadRequest read_req;
+    mjrf_defaultReadRequest(&read_req);
     read_req.target = color_target_.get();
     read_req.output = rgb;
     read_req.num_bytes = viewport.width * viewport.height * 3;
@@ -168,18 +178,27 @@ void CompatContext::ReadPixels(mjrRect viewport, unsigned char* rgb,
     mjrf_defaultRenderRequest(&req);
     req.scene = scene_.get();
     req.draw_mode = mjDRAW_MODE_DEPTH;
+    req.skybox = false;
+    req.haze = false;
     req.camera = scene_bridge_->GetCamera();
     req.viewport = viewport;
     req.target = depth_target_.get();
 
-    mjrfReadPixelsRequest read_req;
-    mjrf_defaultReadPixelsRequest(&read_req);
+    mjrfReadRequest read_req;
+    mjrf_defaultReadRequest(&read_req);
     read_req.target = depth_target_.get();
     read_req.output = reinterpret_cast<uint8_t*>(depth);
     read_req.num_bytes = viewport.width * viewport.height * sizeof(float);
 
     const mjrfFrameHandle frame = mjrf_render(context_.get(), &req, 1, &read_req, 1);
     mjrf_waitForFrame(context_.get(), frame);
+    if (depth_map == mjDEPTH_ZERONEAR) {
+      const size_t npixel =
+          static_cast<size_t>(width) * static_cast<size_t>(height);
+      for (size_t i = 0; i < npixel; ++i) {
+        depth[i] = 1.0f - depth[i];
+      }
+    }
   }
 }
 
@@ -200,7 +219,9 @@ extern "C" {
 // mjr functions that are supported by the filament renderer.
 
 void mjr_defaultContext(mjrContext* con) {
-  memset(con, 0, sizeof(mjrContext));
+  if (con) {
+    memset(con, 0, sizeof(mjrContext));
+  }
 }
 
 void mjr_defaultRendererInfo(mjrRendererInfo* info) {
@@ -221,6 +242,7 @@ void mjr_makeFilamentContext(const mjModel* m, const mjrfContextConfig* cfg,
   if (g_context != nullptr) {
     mju_error("Context already exists!");
   }
+  mjr_defaultContext(con);
   g_context = new mujoco::CompatContext(cfg, m);
 }
 
@@ -257,8 +279,9 @@ void mjr_setBuffer(int framebuffer, mjrContext* con) {
   GetCheckedContext()->SetFrameBuffer(framebuffer);
 }
 void mjr_readPixels(unsigned char* rgb, float* depth, mjrRect viewport,
-                          const mjrContext* con) {
-  GetCheckedContext()->ReadPixels(viewport, rgb, depth);
+                    const mjrContext* con) {
+  const int depth_map = con ? con->readDepthMap : mjDEPTH_ZERONEAR;
+  GetCheckedContext()->ReadPixels(viewport, rgb, depth, depth_map);
 }
 
 // mjr functions that are NOT supported by the filament renderer.

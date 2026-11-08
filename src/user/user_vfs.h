@@ -39,7 +39,7 @@ namespace mujoco::user {
 // operation within that path will be handled by the mjpResourceProvider.
 //
 // Mounting can be done explicitly (using mj_mountVFS) or implicitly (using
-// mjp_registerResourceProvider). If no provider is found for a given path,
+// mjp_registerProvider). If no provider is found for a given path,
 // then a "default" provider is used that uses normal C file operations to
 // open/read/close files.
 //
@@ -59,14 +59,14 @@ class VFS {
 
   // Status codes for VFS operations. Values are based on the mj_VFS APIs.
   enum Status {
-    kSuccess                 = 0,
-    kFailedToLoad            = -1,
-    kFailedToRead            = -1,
-    kNotFound                = -1,
-    kRepeatedName            = 2,
-    kInvalidVfs              = -1,
-    kInvalidResource         = -1,
-    kInvalidResourceProvider = -1,
+    kSuccess         = 0,
+    kFailedToLoad    = -1,
+    kFailedToRead    = -1,
+    kNotFound        = -1,
+    kRepeatedName    = 2,
+    kInvalidVfs      = -1,
+    kInvalidResource = -1,
+    kInvalidProvider = -1,
   };
 
   // Opens a mjResource for the given path, or nullptr on error. If successful,
@@ -88,11 +88,11 @@ class VFS {
   // the mjpResourceProvider associated with the resource.
   Status Close(mjResource* resource);
 
-  // Mounts a ResourceProvider at the given path. All subsequent operations
+  // Mounts a Provider at the given path. All subsequent operations
   // under `path` will be delegated to the `provider` until it is unmounted.
   Status Mount(const FilePath& path, const mjpResourceProvider* provider);
 
-  // Unmounts the ResourceProvider from the given path.
+  // Unmounts the Provider from the given path.
   Status Unmount(const FilePath& path);
 
   // Returns true if the VFS contains a buffer with the given name.
@@ -100,6 +100,10 @@ class VFS {
 
   // Returns true if the VFS contains a file with the given name.
   bool ContainsFile(const char* directory, const char* filename);
+
+  // Returns true if Open(dir, name) would be served from memory: by a mount of
+  // this VFS rather than by the file system or a registered resource provider.
+  bool InMemory(const char* dir, const char* name);
 
   // Sets a destructor to be called when the VFS has no more open resources.
   // Assumes that `destructor` will delete `this`.
