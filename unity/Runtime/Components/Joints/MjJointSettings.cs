@@ -29,6 +29,9 @@ namespace Mujoco {
     [Tooltip("Joint solver settings.")]
     public SolverSettings Solver;
 
+    [Tooltip("Gravity compensation on this joint is applied as actuator force (a control system) rather than passive force.")]
+    public bool ActuatorGravComp;
+
     // Default joint settings.
     public static MjJointSettings Default = new MjJointSettings() {
       Solver = SolverSettings.Default,
@@ -38,12 +41,16 @@ namespace Mujoco {
       Armature = mjcf.GetFloatAttribute("armature", 0.0f);
       Spring.FromMjcf(mjcf, springReferenceIsAngular);
       Solver.FromMjcf(mjcf);
+      ActuatorGravComp = mjcf.GetAttribute("actuatorgravcomp") == "true";
     }
 
     public void ToMjcf(XmlElement mjcf) {
       mjcf.SetAttribute("armature", MjEngineTool.MakeLocaleInvariant($"{Armature}"));
       Spring.ToMjcf(mjcf);
       Solver.ToMjcf(mjcf);
+      if (ActuatorGravComp) {
+        mjcf.SetAttribute("actuatorgravcomp", "true");
+      }
     }
   }
 
