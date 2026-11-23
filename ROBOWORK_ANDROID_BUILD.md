@@ -1,20 +1,21 @@
 # MuJoCo for Android ARM64 (RoboWork)
 
 RoboWork's `RoboSim/Assets/RoboWork/Plugins/Android/arm64-v8a/libmujoco.so` is a Release
-build of official MuJoCo 4.0.0, tag commit `ac60eae30fa7e0d31315c38d9476752fb81be67e`.
-The source is unmodified. It matches the `org.mujoco` 4.0.0 Unity bindings
+build of official MuJoCo 4.0.1, tag commit `4ed093a9f06b170bd1564942fa37e1bb907d93e3`.
+The source is unmodified. It matches the `org.mujoco` 4.0.1 Unity bindings
 (`unity/` in this repository), which import `mujoco`.
 
 - Minimum Android API: **28 / Android 9**. Upstream uses `aligned_alloc`, which
   Android introduced at API 28. PlayerSettings uses the same minimum.
 - ABI: `arm64-v8a`. Unity imports the library for Android ARM64 only.
-- Toolchain: Unity 6000.6.2f1's Android NDK r27c / 27.2.12479018, Clang 18.0.3.
+- Toolchain: Unity's Android NDK r27c / 27.2.12479018, Clang 18.0.3 (in 2026-11 the installed copy is Unity 6000.3.21f1's; the project's
+  6000.6.8f1 has no Android module installed, and both ship the same NDK).
 - Release options: `-O3`, `NDEBUG`, thin LTO; debug and unnecessary symbols stripped.
 - ELF load segments have 16 KB alignment. Unity reports `Is16KbAligned: true`.
 - C++ runtime and MuJoCo dependencies are linked statically. Dynamic dependencies
   are Android's `libc.so`, `libm.so`, and `libdl.so`.
-- Size: 5,896,208 bytes.
-- SHA-256: `2b097c67f9152797b714c18084f85d9ee4f336f9e3d355fbc00a18820dccbc2c`.
+- Size: 5,896,512 bytes.
+- SHA-256: `6905950fc36acb7777115283bd991906cc8df02f368fd76b84efc2414e2c6423`.
 
 ## Rebuild on Windows
 
@@ -22,9 +23,9 @@ Run from the RoboSim repository root in PowerShell. Set `$mujocoNdk` to Unity's
 installed Android NDK directory. Keep every `-D` argument quoted.
 
 ```powershell
-$mujocoNdk = 'C:/Program Files/Unity/Hub/Editor/6000.6.2f1/Editor/Data/PlaybackEngines/AndroidPlayer/NDK'
-git clone --depth 1 --branch 4.0.0 https://github.com/google-deepmind/mujoco.git tmp/mujoco-4.0.0-android-source
-cmake -S tmp/mujoco-4.0.0-android-source -B tmp/mujoco-4.0.0-android-arm64-build -G Ninja `
+$mujocoNdk = 'C:/Program Files/Unity/Hub/Editor/6000.3.21f1/Editor/Data/PlaybackEngines/AndroidPlayer/NDK'
+git clone --depth 1 --branch 4.0.1 https://github.com/google-deepmind/mujoco.git tmp/mujoco-4.0.1-android-source
+cmake -S tmp/mujoco-4.0.1-android-source -B tmp/mujoco-4.0.1-android-arm64-build -G Ninja `
   "-DCMAKE_TOOLCHAIN_FILE=$mujocoNdk/build/cmake/android.toolchain.cmake" `
   '-DCMAKE_CXX_FLAGS=--driver-mode=g++' `
   '-DANDROID_ABI=arm64-v8a' '-DANDROID_PLATFORM=android-28' `
@@ -33,10 +34,10 @@ cmake -S tmp/mujoco-4.0.0-android-source -B tmp/mujoco-4.0.0-android-arm64-build
   '-DMUJOCO_BUILD_SIMULATE=OFF' '-DMUJOCO_BUILD_EXAMPLES=OFF' `
   '-DMUJOCO_BUILD_TESTS=OFF' '-DMUJOCO_TEST_PYTHON_UTIL=OFF' `
   '-DMUJOCO_ENABLE_AVX=OFF' '-DMUJOCO_ENABLE_AVX_INTRINSICS=OFF'
-cmake --build tmp/mujoco-4.0.0-android-arm64-build --target mujoco --parallel 8
+cmake --build tmp/mujoco-4.0.1-android-arm64-build --target mujoco --parallel 8
 & "$mujocoNdk/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe" `
-  --strip-unneeded -o tmp/libmujoco-4.0.0-android-arm64.so `
-  tmp/mujoco-4.0.0-android-arm64-build/lib/libmujoco.so
+  --strip-unneeded -o tmp/libmujoco-4.0.1-android-arm64.so `
+  tmp/mujoco-4.0.1-android-arm64-build/lib/libmujoco.so
 ```
 
 Explicit C++ driver mode is necessary because this Windows CMake/NDK combination
@@ -45,6 +46,13 @@ compiler detection omits libc++ and the library link fails.
 
 Verify the output before replacing the asset. Import and configure it through
 Unity; let Unity generate metadata. Do not patch the MuJoCo source for this build.
+
+## Verification on 2026-11-23
+
+Rebuilt from tag 4.0.1 with the same recipe and options; only the version changed. ELF inspection confirmed AArch64, the
+`libmujoco.so` SONAME, the Android note, 16 KB load alignment (`0x4000` on all three LOAD segments), and dynamic dependencies
+limited to `libc.so`, `libm.so` and `libdl.so`. All 350 P/Invoke function names in the 4.0.1 Unity bindings are exported
+(800 exported functions in all, `mj_version` among them). Android APK and device execution remain unverified.
 
 ## Verification on 2026-11-08
 
