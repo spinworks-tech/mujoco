@@ -52,14 +52,14 @@ class MPMJaxTest(absltest.TestCase):
     self.pos = mpm.sample_box((-0.08, -0.08, 0.0), (0.08, 0.08, 0.1), 0.01)
 
   def test_matches_mujoco_warp(self):
-    """The JAX entry point, jitted with two worlds, matches MJWarp's step."""
+    """The jitted JAX entry point matches MJWarp's step, given the same bodies.
+
+    Both paths read the kinematics MJWarp computes, so the comparison isolates
+    the wrapper from differences between the MJX and MJWarp rigid solvers.
+    """
     m = mjw.put_model(self.mjm)
     d = mjw.put_data(self.mjm, self.mjd, nworld=2)
     mm, md = mjw_mpm.make(m, d, self.pos, material=mpm.Material.SAND, **_ARGS)
-    for _ in range(_NSTEP):
-      mjw.step(m, d)
-      mjw_mpm.step(m, d, mm, md)
-      wp.copy(d.xfrc_applied, md.xfrc)
 
     mx = mjx.put_model(self.mjm)
     dx = jax.vmap(lambda _: mjx.put_data(self.mjm, self.mjd))(jp.arange(2))
@@ -67,22 +67,21 @@ class MPMJaxTest(absltest.TestCase):
         mx, self.pos, nworld=2, material=mpm.Material.SAND, **_ARGS
     )
     self.assertEqual(mmx.nsubstep, mm.nsubstep)
+    step = jax.jit(mpm.step, static_argnums=2)
 
-    @jax.jit
-    def step(dx, state):
-      dx = jax.vmap(mjx.step, in_axes=(None, 0))(mx, dx)
-      state = mpm.step(mx, dx, mmx, state)
-      return dx.replace(xfrc_applied=state.xfrc), state
-
+    kin = ('xipos', 'geom_xpos', 'geom_xmat', 'subtree_com', 'cvel')
     for _ in range(_NSTEP):
-      dx, state = step(dx, state)
+      mjw.step(m, d)
+      dx = dx.replace(**{k: jp.asarray(getattr(d, k).numpy()) for k in kin})
+      mjw_mpm.step(m, d, mm, md)
+      wp.copy(d.xfrc_applied, md.xfrc)
+      state = step(mx, dx, mmx, state)
 
     np.testing.assert_allclose(state.x, md.x.numpy(), atol=1e-4)
-    np.testing.assert_allclose(state.v, md.v.numpy(), atol=1e-2)
-    np.testing.assert_allclose(
-        dx.xpos, d.xpos.numpy(), atol=1e-4
-    )  # same two-way coupled box
-    self.assertGreater(np.abs(state.xfrc[:, 1, 2]).min(), 0.0)
+    np.testing.assert_allclose(state.v, md.v.numpy(), atol=1e-3)
+    # forces up to ~26 N; CPU (JAX) and GPU (MJWarp) sum in different orders
+    np.testing.assert_allclose(state.xfrc, md.xfrc.numpy(), atol=0.05)
+    self.assertGreater(np.abs(state.xfrc[:, 1, 2]).min(), 0.0)  # box is pushed
 
   def test_unbatched_data(self):
     mx = mjx.put_model(self.mjm)

@@ -82,6 +82,7 @@ class MPMModel:
   mu: float
   lam: float
   sand_alpha: float
+  margin: float
 
 
 @dataclasses.dataclass
@@ -127,6 +128,7 @@ def make_model(
   friction_angle: float = 45.0,
   p_vol: float | None = None,
   nsubstep: int | None = None,
+  margin: float = 0.0,
 ) -> MPMModel:
   """Creates the MPM parameters.
 
@@ -141,6 +143,9 @@ def make_model(
     friction_angle: SAND friction angle in degrees.
     p_vol: volume per particle, defaults to (dx/2)^3 (8 particles per cell, see sample_box).
     nsubstep: MPM substeps per MuJoCo step, defaults to the elastic-wave CFL limit.
+    margin: grid nodes closer than this to a geom collide with it (default 0). Lets geoms
+      thinner than a cell stop particles, but enlarges the coupling zone, which makes
+      heavy free bodies rebound off the particles; prefer geoms thicker than dx.
   """
   pos = np.asarray(pos, dtype=np.float32).reshape(-1, 3)
   lower = np.asarray(lower, dtype=np.float32)
@@ -171,6 +176,7 @@ def make_model(
     mu=float(mu),
     lam=float(lam),
     sand_alpha=math.sqrt(2.0 / 3.0) * 2.0 * sin_phi / (3.0 - sin_phi),
+    margin=float(margin or 0.0),
   )
 
 
@@ -328,6 +334,7 @@ def _grid_update(
   res: wp.vec3i,
   lower: wp.vec3,
   dx: float,
+  margin: float,
   grid_m_in: wp.array4d[float],
   # In/Out:
   grid_mv: wp.array4d[wp.vec3],
@@ -347,7 +354,8 @@ def _grid_update(
     rot = geom_xmat_in[worldid, geomid]
     local = wp.transpose(rot) @ (pos - geom_xpos_in[worldid, geomid])
     phi, n_local = _geom_sdf(geom_type[geomid], local, geom_size[worldid % geom_size.shape[0], geomid])
-    if phi >= 0.0:
+    # ponytail: geoms thinner than dx leak particles; port Genesis' CPIC if that matters.
+    if phi >= margin:
       continue
     n = wp.normalize(rot @ n_local)
 
@@ -543,6 +551,7 @@ def step_arrays(
         mm.grid_res,
         mm.lower,
         mm.dx,
+        mm.margin,
         grid_m,
       ],
       outputs=[grid_mv, xfrc],

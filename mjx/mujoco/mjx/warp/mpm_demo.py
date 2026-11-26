@@ -48,14 +48,17 @@ _XML = """
     <geom type="box" pos="0 -.24 .05" size=".21 .03 .05" rgba=".5 .5 .55 .3"/>
     <body name="paddle" pos="0 0 .05">
       <joint name="hinge" axis="0 0 1" armature=".05" damping=".1"/>
-      <geom type="box" pos=".1 0 0" size=".1 .008 .04" rgba=".8 .2 .2 1"
+      <!-- 3 cm thick: geoms thinner than a grid cell (2.5 cm) leak particles -->
+      <geom type="box" pos=".1 0 0" size=".1 .015 .04" rgba=".8 .2 .2 1"
             contype="2" conaffinity="0"/>
       <geom type="cylinder" size=".015 .06" rgba=".3 .3 .3 1"
             contype="2" conaffinity="0"/>
     </body>
     <body name="ball" pos="-.1 .1 .35">
       <freejoint/>
-      <geom type="sphere" size=".04" density="3000" rgba=".2 .4 .9 1"/>
+      <!-- conaffinity bit 2 lets the paddle (contype 2) hit the ball -->
+      <geom type="sphere" size=".04" density="3000" rgba=".2 .4 .9 1"
+            conaffinity="3"/>
     </body>
   </worldbody>
   <actuator>
