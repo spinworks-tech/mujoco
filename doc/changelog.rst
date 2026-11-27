@@ -11,6 +11,9 @@ General
   constraints. Constraints can be soft: a soft constraint holds exactly up to a threshold on its multiplier and then
   yields with a given compliance, so problems with soft constraints remain feasible. The solver can be warmstarted
   from a previous active set. The Hessian can be singular or zero (a linear program).
+- Added a material point method (MPM) solver for sand, liquids and elastic solids, coupled two-way with rigid bodies:
+  the ``mujoco.mpm`` `engine plugin <https://github.com/google-deepmind/mujoco/blob/main/plugin/mpm/README.md>`__ for
+  CPU MuJoCo, and the same solver in MuJoCo Warp and MJX for the GPU. Both read the same XML configuration.
 
 Engine
 ^^^^^^

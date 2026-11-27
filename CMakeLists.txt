@@ -155,6 +155,7 @@ target_include_directories(
 
 if(NOT EMSCRIPTEN)
   add_subdirectory(plugin/actuator)
+  add_subdirectory(plugin/mpm)
   add_subdirectory(plugin/sensor)
   add_subdirectory(plugin/sdf)
   add_subdirectory(plugin/package_uri)

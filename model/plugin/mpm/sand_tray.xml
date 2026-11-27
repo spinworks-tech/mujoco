@@ -1,0 +1,74 @@
+<!-- Copyright 2026 DeepMind Technologies Limited
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+         http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+-->
+
+<!-- A motor-driven paddle plows a sand tray and a ball drops in: the scene of
+     mjx/mujoco/mjx/warp/mpm_demo.py, for the mujoco.mpm plugin (CPU MuJoCo).
+     The same file configures the GPU solver: mujoco_warp mpm.from_spec. -->
+<mujoco model="MPM sand tray">
+  <option timestep="0.002"/>
+
+  <extension>
+    <plugin plugin="mujoco.mpm">
+      <instance name="sand">
+        <config key="material" value="sand"/>
+        <config key="density" value="1600"/>
+        <config key="dx" value="0.025"/>
+        <config key="lower" value="-0.35 -0.35 -0.1"/>
+        <config key="upper" value="0.35 0.35 0.5"/>
+        <config key="box" value="-0.2 -0.2 0 0.2 0.2 0.06"/>
+      </instance>
+    </plugin>
+  </extension>
+
+  <visual>
+    <global offwidth="960" offheight="720"/>
+    <quality offsamples="4"/>
+    <map znear="0.01"/>
+    <scale framelength="0.2" framewidth="0.01"/>
+  </visual>
+
+  <statistic center="0 0 0.05" extent="0.5"/>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 .2 .3"
+             width="300" height="300"/>
+    <material name="grid" texture="grid" texrepeat="8 8" reflectance=".2"/>
+  </asset>
+
+  <worldbody>
+    <!-- refer to the instance, so that copies of the spec (mj_copySpec) keep it -->
+    <plugin instance="sand"/>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom type="plane" size="1 1 .1" material="grid"/>
+    <geom type="box" pos=" .24 0 .05" size=".03 .27 .05" rgba=".5 .5 .55 .3"/>
+    <geom type="box" pos="-.24 0 .05" size=".03 .27 .05" rgba=".5 .5 .55 .3"/>
+    <geom type="box" pos="0  .24 .05" size=".21 .03 .05" rgba=".5 .5 .55 .3"/>
+    <geom type="box" pos="0 -.24 .05" size=".21 .03 .05" rgba=".5 .5 .55 .3"/>
+    <body name="paddle" pos="0 0 .05">
+      <joint name="hinge" axis="0 0 1" armature=".05" damping=".1"/>
+      <geom type="box" pos=".1 0 0" size=".1 .015 .04" rgba=".8 .2 .2 1" contype="2" conaffinity="0"/>
+      <geom type="cylinder" size=".015 .06" rgba=".3 .3 .3 1" contype="2" conaffinity="0"/>
+    </body>
+    <body name="ball" pos="-.1 .1 .35">
+      <freejoint/>
+      <!-- conaffinity bit 2 lets the paddle (contype 2) hit the ball -->
+      <geom type="sphere" size=".04" density="3000" rgba=".2 .4 .9 1" conaffinity="3"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity joint="hinge" kv="20" ctrlrange="-5 5"/>
+  </actuator>
+</mujoco>

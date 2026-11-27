@@ -159,6 +159,7 @@ cc_test(
     deps = [
         "//:mujoco",
         "//plugin/actuator:register",
+        "//plugin/mpm:register",
         "//plugin/sdf:register",
         "//plugin/sensor:register",
         "//src/xml:xml_api",

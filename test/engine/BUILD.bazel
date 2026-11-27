@@ -453,6 +453,7 @@ cc_test(
     deps = [
         "//:libmujoco_hdrs",
         "//plugin/actuator:register",
+        "//plugin/mpm:register",
         "//plugin/sdf:register",
         "//plugin/sensor:register",
         "//src/engine:engine_io_hdrs",
