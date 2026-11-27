@@ -19,11 +19,16 @@ import jax
 from jax import numpy as jp
 import mujoco
 from mujoco import mjx
-from mujoco.mjx.third_party import mujoco_warp as mjw
-from mujoco.mjx.third_party.mujoco_warp._src import mpm as mjw_mpm
-from mujoco.mjx.warp import mpm
+import mujoco.mjx.warp as mjxw
 import numpy as np
-import warp as wp
+
+if mjxw.WARP_INSTALLED:
+  # pylint: disable=g-import-not-at-top
+  from mujoco.mjx.third_party import mujoco_warp as mjw
+  from mujoco.mjx.third_party.mujoco_warp._src import mpm as mjw_mpm
+  from mujoco.mjx.warp import mpm
+  import warp as wp
+  # pylint: enable=g-import-not-at-top
 
 _XML = """
 <mujoco>
@@ -46,6 +51,8 @@ class MPMJaxTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
+    if not mjxw.WARP_INSTALLED:
+      self.skipTest('Warp not installed.')
     self.mjm = mujoco.MjModel.from_xml_string(_XML)
     self.mjd = mujoco.MjData(self.mjm)
     mujoco.mj_forward(self.mjm, self.mjd)

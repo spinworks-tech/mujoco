@@ -26,7 +26,15 @@ system: after 3 s the sand surfaces differ by about 2 mm on average.
     </instance>
   </plugin>
 </extension>
+<worldbody>
+  <plugin instance="sand"/>
+  ...
+</worldbody>
 ```
+
+The `<plugin instance="sand"/>` in the world body is optional for simulation,
+but keeps the instance in copies of the spec: `mj_copySpec` (`MjSpec.copy()`
+in Python) drops plugin instances which no element refers to.
 
 | key | default | meaning |
 |---|---|---|

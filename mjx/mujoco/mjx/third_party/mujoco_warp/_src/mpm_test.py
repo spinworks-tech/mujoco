@@ -291,6 +291,7 @@ _PLUGIN_XML = """
     {config}
   </instance></plugin></extension>
   <worldbody>
+    <plugin instance="particles"/>
     <geom type="plane" size="1 1 .1"/>
     {world}
   </worldbody>

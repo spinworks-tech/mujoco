@@ -127,6 +127,11 @@ def from_spec(spec, name: str | None = None) -> dict:
   if len(found) != 1:
     raise ValueError(f"expected one mujoco.mpm plugin instance{f' named {name}' if name else ''}, found {len(found)}.")
   cfg = dict(found[0].config)
+  # elements may refer to the instance (sand_tray.xml does, so that copies of the spec keep it)
+  for element in spec.bodies + spec.geoms + spec.meshes + spec.actuators + spec.sensors:
+    if element.plugin.active and element.plugin.name == found[0].name:
+      element.plugin.active = False
+      element.plugin.name = ""
   spec.delete(found[0])
 
   def num(key):
