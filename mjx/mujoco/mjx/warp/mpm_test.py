@@ -19,6 +19,7 @@ import jax
 from jax import numpy as jp
 import mujoco
 from mujoco import mjx
+from mujoco.mjx._src import math as mjx_math
 import mujoco.mjx.warp as mjxw
 import numpy as np
 
@@ -76,10 +77,15 @@ class MPMJaxTest(absltest.TestCase):
     self.assertEqual(mmx.nsubstep, mm.nsubstep)
     step = jax.jit(mpm.step, static_argnums=2)
 
-    kin = ('xipos', 'geom_xpos', 'geom_xmat', 'subtree_com', 'cvel')
+    kin = ('xipos', 'geom_xpos', 'subtree_com', 'cvel')
+    # MJWarp has geom quaternions, MJX rotation matrices
+    quat_to_mat = jax.vmap(jax.vmap(mjx_math.quat_to_mat))
     for _ in range(_NSTEP):
       mjw.step(m, d)
-      dx = dx.replace(**{k: jp.asarray(getattr(d, k).numpy()) for k in kin})
+      dx = dx.replace(
+          geom_xmat=quat_to_mat(jp.asarray(d.geom_xquat.numpy())),
+          **{k: jp.asarray(getattr(d, k).numpy()) for k in kin},
+      )
       mjw_mpm.step(m, d, mm, md)
       wp.copy(d.xfrc_applied, md.xfrc)
       state = step(mx, dx, mmx, state)

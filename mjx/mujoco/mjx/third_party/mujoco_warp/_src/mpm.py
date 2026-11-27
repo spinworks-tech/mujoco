@@ -40,6 +40,7 @@ import numpy as np
 import warp as wp
 
 from mujoco.mjx.third_party.mujoco_warp._src import collision_sdf
+from mujoco.mjx.third_party.mujoco_warp._src import math as mjmath
 from mujoco.mjx.third_party.mujoco_warp._src.types import Data
 from mujoco.mjx.third_party.mujoco_warp._src.types import GeomType
 from mujoco.mjx.third_party.mujoco_warp._src.types import Model
@@ -97,6 +98,7 @@ class MPMData:
   grid_m: node mass                                 (nworld, gx, gy, gz)
   xfrc: reaction of the particles on each body,     (nworld, nbody, 6)
         laid out like Data.xfrc_applied (force, torque at xipos), averaged over the step
+  geom_xmat: geom orientations, from Data.geom_xquat (nworld, ngeom, 3, 3)
   """
 
   x: wp.array2d[wp.vec3]
@@ -107,6 +109,7 @@ class MPMData:
   grid_mv: wp.array4d[wp.vec3]
   grid_m: wp.array4d[float]
   xfrc: wp.array2d[wp.spatial_vector]
+  geom_xmat: wp.array2d[wp.mat33]
 
 
 def sample_box(lo, hi, spacing: float) -> np.ndarray:
@@ -244,8 +247,15 @@ def make(m: Model, d: Data, pos: np.ndarray, lower, upper, dx: float, **kwargs) 
     grid_mv=wp.zeros(grid, dtype=wp.vec3),
     grid_m=wp.zeros(grid, dtype=float),
     xfrc=wp.zeros((d.nworld, d.xfrc_applied.shape[1]), dtype=wp.spatial_vector),
+    geom_xmat=wp.zeros(d.geom_xquat.shape, dtype=wp.mat33),
   )
   return mm, md
+
+
+@wp.kernel
+def _geom_xmat(geom_xquat_in: wp.array2d[wp.quat], geom_xmat_out: wp.array2d[wp.mat33]):
+  worldid, geomid = wp.tid()
+  geom_xmat_out[worldid, geomid] = mjmath.quat_to_mat(geom_xquat_in[worldid, geomid])
 
 
 @wp.func
@@ -568,6 +578,8 @@ def step(m: Model, d: Data, mm: MPMModel, md: MPMData):
 
   Fills md.xfrc with the reaction of the particles on the bodies.
   """
+  # the kernels take rotation matrices, which MJX (mujoco.mjx.warp.mpm) has
+  wp.launch(_geom_xmat, dim=d.geom_xquat.shape, inputs=[d.geom_xquat], outputs=[md.geom_xmat])
   step_arrays(
     mm,
     m.opt.timestep,
@@ -581,7 +593,7 @@ def step(m: Model, d: Data, mm: MPMModel, md: MPMData):
     m.geom_friction,
     d.xipos,
     d.geom_xpos,
-    d.geom_xmat,
+    md.geom_xmat,
     d.subtree_com,
     d.cvel,
     md.x,
