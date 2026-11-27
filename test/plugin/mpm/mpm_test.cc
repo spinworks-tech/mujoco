@@ -17,7 +17,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -169,38 +172,184 @@ TEST_F(MpmTest, ThinPlateHoldsParticles) {
 
 TEST_F(MpmTest, ReactionSupportsWeight) {
   // particles resting on a static box push it down with their weight
-  std::string world = R"(<body name="table" pos="0 0 0.05"><geom type="box" size="0.15 0.15 0.05"/></body>)";
+  std::string world =
+      R"(<body name="table" pos="0 0 0.05"><geom type="box" size="0.15 0.15 0.05"/></body>)";
   char error[1024];
-  MjModelPtr m = LoadModelFromString(Xml(world, "elastic", "-0.05 -0.05 0.12 0.05 0.05 0.2"),
-                                     error, sizeof(error));
-  ASSERT_THAT(m.get(), NotNull()) << error;
-  MjDataPtr d = MakeData(m);
-  Step(m.get(), d.get(), 500);
-  Particles p = GetParticles(m.get(), d.get());
-  mjtNum weight = p.n * 1000 * std::pow(0.5 * kDx, 3) * kG;
-  const mjtNum* f = p.xfrc(1);
-  EXPECT_NEAR(f[2], -weight, 0.1 * weight);
-  EXPECT_NEAR(f[0], 0, 0.05 * weight);
-  EXPECT_NEAR(f[1], 0, 0.05 * weight);
+  for (const char* density : {"1000", "1600"}) {
+    std::string extra = std::string(R"(<config key="density" value=")") + density + R"("/>)";
+    MjModelPtr m = LoadModelFromString(
+        Xml(world, "elastic", "-0.05 -0.05 0.12 0.05 0.05 0.2", extra), error, sizeof(error));
+    ASSERT_THAT(m.get(), NotNull()) << error;
+    MjDataPtr d = MakeData(m);
+    Step(m.get(), d.get(), 500);
+    Particles p = GetParticles(m.get(), d.get());
+    mjtNum weight = std::stod(density) * 0.1 * 0.1 * 0.08 * kG;
+    const mjtNum* f = p.xfrc(1);
+    EXPECT_NEAR(f[2], -weight, 0.1 * weight) << density;
+    EXPECT_NEAR(f[0], 0, 0.05 * weight) << density;
+    EXPECT_NEAR(f[1], 0, 0.05 * weight) << density;
+  }
 }
 
 TEST_F(MpmTest, TwoWayCoupling) {
-  // a free box falling on a resting elastic block is held up by the particles
+  // a free box falling on sand sinks in, and is then held up by the particles
   std::string world = R"(
     <geom type="plane" size="1 1 0.1"/>
     <body pos="0 0 0.17">
       <freejoint/>
-      <geom type="box" size="0.03 0.03 0.03" density="300" contype="2" conaffinity="2"/>
+      <geom type="box" size="0.03 0.03 0.03" density="1000" contype="2" conaffinity="2"/>
     </body>)";
   char error[1024];
-  MjModelPtr m = LoadModelFromString(
-      Xml(world, "elastic", "-0.08 -0.08 0 0.08 0.08 0.1", R"(<config key="young" value="1e5"/>)"),
-      error, sizeof(error));
+  MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.08 -0.08 0 0.08 0.08 0.1"), error,
+                                     sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
   MjDataPtr d = MakeData(m);
   Step(m.get(), d.get(), 400);
-  EXPECT_GT(d->xpos[5], 0.1);  // resting on the block (half size 0.03), not on the floor
-  EXPECT_LT(d->xpos[5], 0.17);
+  EXPECT_GT(d->xpos[5], 0.06);  // resting in the sand (half size 0.03), not on the floor
+  EXPECT_LT(d->xpos[5], 0.14);
+  for (int i = 0; i < 3; i++) EXPECT_LT(std::abs(d->qvel[i]), 0.05);
+}
+
+TEST_F(MpmTest, FrictionAngleSetsPileHeight) {
+  mjtNum height[2];
+  const char* angle[2] = {"20", "45"};
+  for (int i = 0; i < 2; i++) {
+    char error[1024];
+    std::string extra =
+        std::string(R"(<config key="friction_angle" value=")") + angle[i] + R"("/>)";
+    MjModelPtr m = LoadModelFromString(Xml(kFloor, "sand", "-0.04 -0.04 0 0.04 0.04 0.16", extra),
+                                       error, sizeof(error));
+    ASSERT_THAT(m.get(), NotNull()) << error;
+    MjDataPtr d = MakeData(m);
+    Step(m.get(), d.get(), 300);
+    Particles p = GetParticles(m.get(), d.get());
+    std::vector<mjtNum> z;
+    for (int j = 0; j < p.n; j++) z.push_back(p.x(j)[2]);
+    std::sort(z.begin(), z.end());
+    height[i] = z[static_cast<int>(0.95 * (p.n - 1))];
+  }
+  EXPECT_GT(height[1], 1.2 * height[0]);
+}
+
+TEST_F(MpmTest, GeomFrictionSlowsSliding) {
+  // sand on a 20 degree slope slides freely without geom friction, and much less with it
+  mjtNum slide[2];
+  const char* friction[2] = {"0.01", "1"};
+  for (int i = 0; i < 2; i++) {
+    std::string world =
+        std::string(R"(<geom type="plane" size="1 1 0.1" euler="0 20 0" friction=")") +
+        friction[i] + R"("/>)";
+    char error[1024];
+    MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.05 -0.05 0.03 0.05 0.05 0.09"), error,
+                                       sizeof(error));
+    ASSERT_THAT(m.get(), NotNull()) << error;
+    MjDataPtr d = MakeData(m);
+    Step(m.get(), d.get(), 120);
+    Particles p = GetParticles(m.get(), d.get());
+    slide[i] = 0;
+    for (int j = 0; j < p.n; j++) slide[i] += p.x(j)[0] / p.n;  // starts centred on x = 0
+  }
+  EXPECT_GT(slide[0], 2 * slide[1]);
+  EXPECT_GT(slide[1], 0);
+}
+
+TEST_F(MpmTest, GeomTypesHoldParticles) {
+  // sand poured on each geom type flows around it: no particle ends up inside
+  using Sdf = std::function<mjtNum(const mjtNum*)>;  // distance of a point in the geom frame
+  auto norm = [](mjtNum x, mjtNum y, mjtNum z) { return std::sqrt(x*x + y*y + z*z); };
+  std::vector<std::pair<std::string, Sdf>> geoms = {
+      {R"(type="sphere" size="0.06")",
+       [&](const mjtNum* p) { return norm(p[0], p[1], p[2]) - 0.06; }},
+      {R"(type="capsule" size="0.04 0.05")",
+       [&](const mjtNum* p) {
+         return norm(p[0], p[1], p[2] - std::clamp(p[2], -0.05, 0.05)) - 0.04;
+       }},
+      {R"(type="cylinder" size="0.06 0.03")",
+       [&](const mjtNum* p) {
+         return std::max(norm(p[0], p[1], 0) - 0.06, std::abs(p[2]) - 0.03);
+       }},
+      // first-order distance, exact at the surface
+      {R"(type="ellipsoid" size="0.08 0.05 0.03")",
+       [&](const mjtNum* p) { return (norm(p[0] / 0.08, p[1] / 0.05, p[2] / 0.03) - 1) * 0.03; }},
+      {R"(type="box" size="0.06 0.05 0.03")",
+       [&](const mjtNum* p) {
+         return std::max({std::abs(p[0]) - 0.06, std::abs(p[1]) - 0.05, std::abs(p[2]) - 0.03});
+       }},
+  };
+  for (const auto& [geom, sdf] : geoms) {
+    std::string world = std::string(kFloor) + "<geom pos=\"0 0 0.07\" " + geom + "/>";
+    char error[1024];
+    MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.05 -0.05 0.14 0.05 0.05 0.24"), error,
+                                       sizeof(error));
+    ASSERT_THAT(m.get(), NotNull()) << error;
+    MjDataPtr d = MakeData(m);
+    Step(m.get(), d.get(), 300);
+    Particles p = GetParticles(m.get(), d.get());
+    int ntouch = 0;
+    for (int i = 0; i < p.n; i++) {
+      mjtNum local[3] = {p.x(i)[0], p.x(i)[1], p.x(i)[2] - 0.07};
+      mjtNum dist = sdf(local);
+      ASSERT_GT(dist, -1e-5) << geom;
+      ASSERT_GT(p.x(i)[2], -1e-5) << geom;
+      ntouch += dist < 0.5 * kDx;
+    }
+    EXPECT_GT(ntouch, 20) << geom;  // and the sand does touch it
+  }
+}
+
+TEST_F(MpmTest, DomainWallsHoldParticles) {
+  // liquid thrown at the domain walls stays inside
+  char error[1024];
+  MjModelPtr m = LoadModelFromString(Xml(kFloor, "liquid"), error, sizeof(error));
+  ASSERT_THAT(m.get(), NotNull()) << error;
+  MjDataPtr d = MakeData(m);
+  Particles p = GetParticles(m.get(), d.get());
+  mjtNum* v = d->plugin_state + m->plugin_stateadr[0] + 3 * p.n;
+  for (int i = 0; i < p.n; i++) v[3*i] = 3, v[3*i+1] = -2;
+  Step(m.get(), d.get(), 300);
+  mjtNum xmax = -1;
+  for (int i = 0; i < p.n; i++) {
+    xmax = std::max(xmax, p.x(i)[0]);
+    for (int a = 0; a < 3; a++) {
+      ASSERT_TRUE(std::isfinite(p.x(i)[a]));
+      ASSERT_GT(p.x(i)[a], (a < 2 ? -0.3 : -0.1) + kDx);
+      ASSERT_LT(p.x(i)[a], (a < 2 ? 0.3 : 0.5) - kDx);
+    }
+  }
+  EXPECT_GT(xmax, 0.2);  // reached the wall
+}
+
+TEST_F(MpmTest, TwoInstances) {
+  // two instances in one model each advance like the same instance on its own
+  char error[1024];
+  std::string one = Xml(kFloor, "sand", "-0.15 -0.05 0.1 -0.05 0.05 0.2");
+  std::string second = R"(
+      <instance name="liquid">
+        <config key="material" value="liquid"/>
+        <config key="dx" value="0.025"/>
+        <config key="lower" value="-0.3 -0.3 -0.1"/>
+        <config key="upper" value="0.3 0.3 0.5"/>
+        <config key="box" value="0.05 -0.05 0.1 0.15 0.05 0.2"/>
+      </instance>
+    </plugin>)";
+  MjModelPtr m1 = LoadModelFromString(one, error, sizeof(error));
+  ASSERT_THAT(m1.get(), NotNull()) << error;
+  MjModelPtr m2 = LoadModelFromString(absl::StrReplaceAll(one, {{"</plugin>", second}}), error,
+                                      sizeof(error));
+  ASSERT_THAT(m2.get(), NotNull()) << error;
+  ASSERT_EQ(m2->nplugin, 2);
+  MjDataPtr d1 = MakeData(m1);
+  MjDataPtr d2 = MakeData(m2);
+  Step(m1.get(), d1.get(), 100);
+  Step(m2.get(), d2.get(), 100);
+  for (int i = 0; i < m1->npluginstate; i++) {
+    ASSERT_EQ(d1->plugin_state[i], d2->plugin_state[m2->plugin_stateadr[0] + i]) << i;
+  }
+  // the liquid fell too
+  int n = (m2->plugin_statenum[1] - 6 * m2->nbody) / 25;
+  EXPECT_EQ(n, 512);
+  const mjtNum* x = d2->plugin_state + m2->plugin_stateadr[1];
+  for (int i = 0; i < n; i++) EXPECT_LT(x[3*i+2], 0.1);
 }
 
 TEST_F(MpmTest, ResetAndCopy) {

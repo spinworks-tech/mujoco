@@ -45,6 +45,7 @@ from mujoco.mjx.third_party.mujoco_warp._src.types import GeomType
 from mujoco.mjx.third_party.mujoco_warp._src.types import Model
 
 _BOUND = 3  # grid cells next to the domain walls that stop outward motion
+_CONTACT_TOL = 1.0e-4  # distance to a geom, in cells, that counts as on its surface
 
 
 class Material(enum.IntEnum):
@@ -361,6 +362,7 @@ def _collide(
   v: wp.vec3,
   mass: float,
   step_dt: float,
+  tol: float,
   project: bool,
   # Out:
   xfrc_out: wp.array2d[wp.spatial_vector],
@@ -370,6 +372,10 @@ def _collide(
   Stops the inward velocity relative to each geom it is inside of, with
   Coulomb friction, adds the reaction to xfrc_out, and if project, moves pos out
   of the geoms it is inside. Returns the new pos and v.
+
+  The point is in contact when its distance to the geom is below tol. Points often lie exactly
+  on a surface, where rounding would otherwise decide: grid nodes (a floor at a multiple of dx)
+  and the particles projected onto it.
   """
   for geomid in range(ngeom):
     if geom_contype[geomid] == 0 and geom_conaffinity[geomid] == 0:
@@ -377,10 +383,10 @@ def _collide(
     rot = geom_xmat_in[worldid, geomid]
     local = wp.transpose(rot) @ (pos - geom_xpos_in[worldid, geomid])
     phi, n_local = _geom_sdf(geom_type[geomid], local, geom_size[worldid % geom_size.shape[0], geomid])
-    if phi >= 0.0:
+    if phi >= tol:
       continue
     n = wp.normalize(rot @ n_local)
-    if project and phi < 0.0:
+    if project:
       pos -= phi * n
 
     # velocity of the geom at the point; cvel is (rot, lin) about the root subtree com
@@ -448,7 +454,7 @@ def _grid_update(
   pos, v = _collide(
     ngeom, body_rootid, geom_type, geom_contype, geom_conaffinity, geom_bodyid, geom_size, geom_friction,
     xipos_in, geom_xpos_in, geom_xmat_in, subtree_com_in, cvel_in,
-    worldid, pos, v, mass, step_dt, False, xfrc_out,
+    worldid, pos, v, mass, step_dt, _CONTACT_TOL * dx, False, xfrc_out,
   )  # fmt: skip
 
   # domain walls
@@ -517,7 +523,7 @@ def _g2p(
   xp, v = _collide(
     ngeom, body_rootid, geom_type, geom_contype, geom_conaffinity, geom_bodyid, geom_size, geom_friction,
     xipos_in, geom_xpos_in, geom_xmat_in, subtree_com_in, cvel_in,
-    worldid, x[worldid, pid] + dt * v, v, p_mass, step_dt, True, xfrc_out,
+    worldid, x[worldid, pid] + dt * v, v, p_mass, step_dt, _CONTACT_TOL * dx, True, xfrc_out,
   )  # fmt: skip
   x[worldid, pid] = xp
   v_out[worldid, pid] = v

@@ -7,7 +7,10 @@ This plugin runs on the CPU, in standard MuJoCo and `simulate`. The same solver
 runs on the GPU in MuJoCo Warp and MJX
 (`mjx/mujoco/mjx/third_party/mujoco_warp/_src/mpm.py`), for parallel training.
 Both read the same XML configuration and produce matching trajectories, up to
-float32 rounding (tested in `mpm_test.py` there).
+float32 rounding (tested in `mpm_test.py` there). In a static scene the
+particles agree to a fraction of a millimetre after 300 steps. In a stirred
+one, such as `sand_tray.xml`, rounding differences grow as in any chaotic
+system: after 3 s the sand surfaces differ by about 2 mm on average.
 
 ## Configuration
 
@@ -93,5 +96,18 @@ or a softer material (fewer substeps).
 
 - Mesh, heightfield and SDF geoms don't collide with particles.
 - Each instance has a single material.
-- Rigid bodies and particles exchange forces once per step, so heavy, fast
-  impacts rebound somewhat.
+- Particles come to rest up to about half a cell above a surface, as usual for
+  MPM: the grid stops them at the nodes around it.
+- Rigid bodies and particles exchange forces once per step, with a one-step
+  delay. Sand absorbs the error this introduces, though a body lighter than
+  water can rebound higher than it fell before it settles. Elastic material
+  doesn't absorb it: a body resting on an elastic block can keep bouncing, and
+  a light one on a stiff block gains energy. Use sand or liquid under free
+  bodies, or bodies that are heavy relative to the material they press on.
+
+## Tests
+
+`test/plugin/mpm/mpm_test.cc` tests the plugin on its own (`ctest -R MpmTest`).
+`mjx/mujoco/mjx/third_party/mujoco_warp/_src/mpm_test.py` tests the GPU solver
+and, when `MUJOCO_MPM_PLUGIN` is set to the plugin library built as above,
+compares the two on every material, geom type and config key.

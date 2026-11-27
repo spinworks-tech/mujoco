@@ -41,6 +41,22 @@ _FLOOR = """
 """
 
 
+# geoms centred at (0, 0, 0.07): type -> (attributes, signed distance of points in the geom frame)
+_GEOMS = {
+  "sphere": ('size="0.06"', lambda p: np.linalg.norm(p, axis=-1) - 0.06),
+  "capsule": ('size="0.04 0.05"', lambda p: np.linalg.norm(p - _axis(p, 0.05), axis=-1) - 0.04),
+  "cylinder": ('size="0.06 0.03"', lambda p: np.maximum(np.hypot(p[..., 0], p[..., 1]) - 0.06, abs(p[..., 2]) - 0.03)),
+  # first-order distance, exact at the surface
+  "ellipsoid": ('size="0.08 0.05 0.03"', lambda p: (np.linalg.norm(p / (0.08, 0.05, 0.03), axis=-1) - 1) * 0.03),
+  "box": ('size="0.06 0.05 0.03"', lambda p: (abs(p) - (0.06, 0.05, 0.03)).max(axis=-1)),
+}
+
+
+def _axis(p, half):
+  """Closest points to p on the segment of half length half along z."""
+  return np.stack([0 * p[..., 0], 0 * p[..., 0], np.clip(p[..., 2], -half, half)], axis=-1)
+
+
 def _setup(xml, nworld=1, **kwargs):
   mjm = mujoco.MjModel.from_xml_string(xml)
   mjd = mujoco.MjData(mjm)
@@ -102,6 +118,75 @@ class MPMTest(parameterized.TestCase):
       heights[material] = np.percentile(x[..., 2], 95)
     self.assertGreater(heights[mpm.Material.SAND], 2.0 * heights[mpm.Material.LIQUID])
 
+  @parameterized.parameters((20.0, 45.0))
+  def test_friction_angle_sets_pile_height(self, low, high):
+    pos = mpm.sample_box((-0.04, -0.04, 0.0), (0.04, 0.04, 0.16), 0.5 * _DX)
+    heights = []
+    for friction_angle in (low, high):
+      m, d, mm, md = _setup(_FLOOR.format(c=1), pos=pos, material=mpm.Material.SAND, friction_angle=friction_angle)
+      x, _ = _run(m, d, mm, md, 300)
+      heights.append(np.percentile(x[..., 2], 95))
+    self.assertGreater(heights[1], 1.2 * heights[0])
+
+  def test_geom_friction_slows_sliding(self):
+    """Sand on a 20 degree slope slides freely without geom friction, and much less with it."""
+    slide = []
+    for friction in (0.01, 1.0):
+      xml = f"""
+      <mujoco>
+        <option timestep="0.002"/>
+        <worldbody>
+          <geom type="plane" size="1 1 0.1" euler="0 20 0" friction="{friction}"/>
+        </worldbody>
+      </mujoco>
+      """
+      pos = mpm.sample_box((-0.05, -0.05, 0.03), (0.05, 0.05, 0.09), 0.5 * _DX)
+      m, d, mm, md = _setup(xml, pos=pos, material=mpm.Material.SAND)
+      x, _ = _run(m, d, mm, md, 120)
+      slide.append(x[..., 0].mean() - pos[:, 0].mean())
+    self.assertGreater(slide[0], 2.0 * slide[1])
+    self.assertGreater(slide[1], 0.0)
+
+  @parameterized.parameters(*_GEOMS)
+  def test_geom_types_hold_particles(self, geom):
+    """Sand poured on each geom type flows around it: no particle ends up inside."""
+    attr, sdf = _GEOMS[geom]
+    xml = f"""
+    <mujoco>
+      <option timestep="0.002"/>
+      <worldbody>
+        <geom type="plane" size="1 1 0.1"/>
+        <geom type="{geom}" pos="0 0 0.07" {attr}/>
+      </worldbody>
+    </mujoco>
+    """
+    pos = mpm.sample_box((-0.05, -0.05, 0.14), (0.05, 0.05, 0.24), 0.5 * _DX)
+    m, d, mm, md = _setup(xml, pos=pos, material=mpm.Material.SAND)
+    x, _ = _run(m, d, mm, md, 300)
+    dist = sdf(x[0] - np.array([0.0, 0.0, 0.07]))
+    self.assertGreater(dist.min(), -1e-5)
+    self.assertGreater((dist < 0.5 * _DX).sum(), 20)  # and the sand does touch it
+    self.assertGreater(x[..., 2].min(), -1e-5)
+
+  def test_domain_walls_hold_particles(self):
+    """Liquid thrown at the domain walls stays inside."""
+    m, d, mm, md = _setup(_FLOOR.format(c=1), material=mpm.Material.LIQUID)
+    v0 = np.zeros(md.v.shape + (3,), dtype=np.float32)
+    v0[..., 0], v0[..., 1] = 3.0, -2.0
+    md.v.assign(v0)
+    x, _ = _run(m, d, mm, md, 300)
+    self.assertTrue(np.isfinite(x).all())
+    self.assertGreater(x[..., 0].max(), 0.2)  # reached the wall
+    self.assertTrue(np.all(x > np.array(_LOWER) + _DX) and np.all(x < np.array(_UPPER) - _DX))
+
+  def test_particles_outside_domain_raise(self):
+    with self.assertRaisesRegex(ValueError, "cells inside"):
+      _setup(_FLOOR.format(c=1), pos=mpm.sample_box((0.2, 0.0, 0.1), (0.3, 0.1, 0.2), 0.5 * _DX))
+
+  def test_from_spec_needs_one_instance(self):
+    with self.assertRaisesRegex(ValueError, "found 0"):
+      mpm.from_spec(mujoco.MjSpec.from_string(_FLOOR.format(c=1)))
+
   def test_thin_plate_holds_particles(self):
     """A plate thinner than a grid cell still stops the particles: none get inside or through it."""
     xml = """
@@ -116,7 +201,8 @@ class MPMTest(parameterized.TestCase):
     x, _ = _run(m, d, mm, md, 300)
     self.assertGreater(x[..., 2].min(), 0.054 - 1e-4)
 
-  def test_reaction_supports_weight(self):
+  @parameterized.parameters(1000.0, 1600.0)
+  def test_reaction_supports_weight(self, rho):
     """The particles resting on a static box push it down with their weight."""
     xml = """
     <mujoco>
@@ -128,15 +214,15 @@ class MPMTest(parameterized.TestCase):
       </worldbody>
     </mujoco>
     """
-    m, d, mm, md = _setup(xml, pos=mpm.sample_box((-0.05, -0.05, 0.12), (0.05, 0.05, 0.2), 0.5 * _DX))
+    m, d, mm, md = _setup(xml, pos=mpm.sample_box((-0.05, -0.05, 0.12), (0.05, 0.05, 0.2), 0.5 * _DX), rho=rho)
     _run(m, d, mm, md, 500)
-    weight = mm.nparticle * mm.p_mass * _G
+    weight = rho * 0.1 * 0.1 * 0.08 * _G
     force = md.xfrc.numpy()[0, 1, :3]
     np.testing.assert_allclose(force[2], -weight, rtol=0.1)
     np.testing.assert_allclose(force[:2], 0.0, atol=0.05 * weight)
 
   def test_two_way_coupling(self):
-    """A free box falling on a resting block is held up by the particles."""
+    """A free box falling on sand sinks in, and is then held up by the particles."""
     xml = """
     <mujoco>
       <option timestep="0.002"/>
@@ -144,35 +230,40 @@ class MPMTest(parameterized.TestCase):
         <geom type="plane" size="1 1 0.1"/>
         <body pos="0 0 0.17">
           <freejoint/>
-          <geom type="box" size="0.03 0.03 0.03" density="300" contype="2" conaffinity="2"/>
+          <geom type="box" size="0.03 0.03 0.03" density="1000" contype="2" conaffinity="2"/>
         </body>
       </worldbody>
     </mujoco>
     """
-    # elastic block 0 < z < 0.1, box starts just above it; plane and box don't collide
-    m, d, mm, md = _setup(xml, pos=mpm.sample_box((-0.08, -0.08, 0.0), (0.08, 0.08, 0.1), 0.5 * _DX), E=1e5)
+    # sand 0 < z < 0.1, box starts just above it; plane and box don't collide
+    pos = mpm.sample_box((-0.08, -0.08, 0.0), (0.08, 0.08, 0.1), 0.5 * _DX)
+    m, d, mm, md = _setup(xml, pos=pos, material=mpm.Material.SAND)
     for _ in range(400):
       mjw.step(m, d)
       mpm.step(m, d, mm, md)
       wp.copy(d.xfrc_applied, md.xfrc)
     z = d.xpos.numpy()[0, 1, 2]
-    self.assertGreater(z, 0.1)  # resting on the block (half size 0.03), not on the floor
-    self.assertLess(z, 0.17)
+    self.assertGreater(z, 0.06)  # resting in the sand (half size 0.03), not on the floor
+    self.assertLess(z, 0.14)
+    self.assertLess(np.abs(d.qvel.numpy()[0, :3]).max(), 0.05)
 
 
 # the mujoco.mpm plugin (plugin/mpm), built against the installed mujoco package
 _PLUGIN = os.environ.get("MUJOCO_MPM_PLUGIN")
 
+_PLUGIN_DEFAULTS = dict(dx=0.02, timestep=0.002, config="")
+
 _PLUGIN_XML = """
 <mujoco>
-  <option timestep="0.002"/>
+  <option timestep="{timestep}"/>
   <extension><plugin plugin="mujoco.mpm"><instance name="particles">
     <config key="material" value="{material}"/>
-    <config key="dx" value="0.02"/>
+    <config key="dx" value="{dx}"/>
     <config key="young" value="1e5"/>
     <config key="lower" value="-0.3 -0.3 -0.1"/>
     <config key="upper" value="0.3 0.3 0.5"/>
     <config key="box" value="{box}"/>
+    {config}
   </instance></plugin></extension>
   <worldbody>
     <geom type="plane" size="1 1 .1"/>
@@ -218,8 +309,34 @@ class CPluginTest(parameterized.TestCase):
   def test_particles_match(self, material):
     """Particles dropped on a plane and a tilted box: same trajectories, up to float32 rounding."""
     world = '<geom type="box" pos="0.03 0 0.04" size="0.03 0.08 0.04" euler="0 20 30"/>'
-    xml = _PLUGIN_XML.format(material=material, box="-0.06 -0.05 0.1 0.06 0.05 0.2", world=world)
+    xml = _PLUGIN_XML.format(material=material, box="-0.06 -0.05 0.1 0.06 0.05 0.2", world=world, **_PLUGIN_DEFAULTS)
     _, _, x_c, x_w = self._run(xml, 300, coupled=False)
+    np.testing.assert_allclose(x_c, x_w, atol=1e-3)
+    self.assertLess(np.abs(x_c - x_w).mean(), 1e-4)
+
+  @parameterized.parameters("sphere", "capsule", "cylinder", "ellipsoid")
+  def test_geom_types_match(self, geom):
+    """Sand poured on the other geom types, tilted."""
+    world = f'<geom type="{geom}" pos="0 0 0.07" euler="30 20 0" friction="0.4" {_GEOMS[geom][0]}/>'
+    xml = _PLUGIN_XML.format(material="sand", box="-0.05 -0.05 0.14 0.05 0.05 0.24", world=world, **_PLUGIN_DEFAULTS)
+    _, _, x_c, x_w = self._run(xml, 300, coupled=False)
+    np.testing.assert_allclose(x_c, x_w, atol=2e-3)
+    self.assertLess(np.abs(x_c - x_w).mean(), 1e-4)
+
+  @parameterized.parameters("elastic", "liquid", "sand")
+  def test_options_match(self, material):
+    """Every config key away from its default, with another grid spacing and timestep."""
+    config = """
+      <config key="poisson" value="0.3"/>
+      <config key="density" value="1600"/>
+      <config key="friction_angle" value="30"/>
+      <config key="nsubstep" value="6"/>
+      <config key="nthread" value="3"/>"""
+    world = '<geom type="box" pos="0.03 0 0.04" size="0.03 0.08 0.04" euler="0 20 30"/>'
+    xml = _PLUGIN_XML.format(
+      material=material, box="-0.05 -0.05 0.1 0.05 0.05 0.2", world=world, dx=0.025, timestep=0.003, config=config
+    )
+    _, _, x_c, x_w = self._run(xml, 200, coupled=False)
     np.testing.assert_allclose(x_c, x_w, atol=1e-3)
     self.assertLess(np.abs(x_c - x_w).mean(), 1e-4)
 
@@ -229,7 +346,7 @@ class CPluginTest(parameterized.TestCase):
       <body pos="0.01 0 0.17"><freejoint/>
         <geom type="box" size="0.03 0.03 0.03" density="300" contype="2" conaffinity="2"/>
       </body>"""
-    xml = _PLUGIN_XML.format(material="sand", box="-0.08 -0.08 0 0.08 0.08 0.1", world=world)
+    xml = _PLUGIN_XML.format(material="sand", box="-0.08 -0.08 0 0.08 0.08 0.1", world=world, **_PLUGIN_DEFAULTS)
     d_c, d, _, _ = self._run(xml, 300, coupled=True)
     self.assertLess(d_c.qpos[2], 0.12)  # sank into the sand
     np.testing.assert_allclose(d_c.qpos[:3], d.qpos.numpy()[0, :3], atol=1e-3)

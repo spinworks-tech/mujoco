@@ -32,6 +32,7 @@ namespace mujoco::plugin::mpm {
 namespace {
 
 constexpr int kBound = 3;  // grid cells next to the domain walls that stop outward motion
+constexpr mjtNum kContactTol = 1e-4;  // distance to a geom, in cells, that counts as on its surface
 
 constexpr const char* kAttributes[] = {
     "material", "dx", "lower", "upper", "box",
@@ -264,8 +265,12 @@ mjtNum GeomSdf(int type, const mjtNum p[3], const mjtNum size[3], mjtNum grad[3]
 // Contact of a point (grid node or particle) with the geoms. Stops the inward velocity relative
 // to each geom it is inside of, with Coulomb friction, adds the reaction to xfrc, and if project,
 // moves pos out of the geoms. As _collide in mpm.py.
+//
+// The point is in contact when its distance to the geom is below tol. Points often lie exactly on
+// a surface, where rounding would otherwise decide: grid nodes (a floor at a multiple of dx) and
+// the particles projected onto it.
 void Collide(const mjModel* m, const mjData* d, mjtNum pos[3], mjtNum v[3], mjtNum mass,
-             bool project, mjtNum* xfrc) {
+             mjtNum tol, bool project, mjtNum* xfrc) {
   for (int g = 0; g < m->ngeom; g++) {
     if (m->geom_contype[g] == 0 && m->geom_conaffinity[g] == 0) continue;
     const mjtNum* rot = d->geom_xmat + 9*g;
@@ -273,7 +278,7 @@ void Collide(const mjModel* m, const mjData* d, mjtNum pos[3], mjtNum v[3], mjtN
     for (int i = 0; i < 3; i++) rel_pos[i] = pos[i] - d->geom_xpos[3*g+i];
     MatTVec(local, rot, rel_pos);
     mjtNum phi = GeomSdf(m->geom_type[g], local, m->geom_size + 3*g, n_local);
-    if (phi >= 0) continue;
+    if (phi >= tol) continue;
     MatVec(n, rot, n_local);
     Normalize(n);
     if (project) for (int i = 0; i < 3; i++) pos[i] -= phi * n[i];
@@ -575,7 +580,8 @@ void Mpm::Advance(const mjModel* m, mjData* d, mjtNum* state) {
             mjtNum* gv = grid_mv_.data() + 3*id;
             for (int a = 0; a < 3; a++) gv[a] = gv[a] / mass + dt * m->opt.gravity[a];
             mjtNum pos[3] = {c.lower[0] + c.dx * i, c.lower[1] + c.dx * j, c.lower[2] + c.dx * k};
-            Collide(m, d, pos, gv, mass, /*project=*/false, xfrc_thread_[thread].data());
+            Collide(m, d, pos, gv, mass, kContactTol * c.dx, /*project=*/false,
+                    xfrc_thread_[thread].data());
             int idx[3] = {i, j, k};
             for (int a = 0; a < 3; a++) {
               if ((idx[a] < kBound && gv[a] < 0) || (idx[a] >= c.res[a] - kBound && gv[a] > 0)) {
@@ -610,7 +616,8 @@ void Mpm::Advance(const mjModel* m, mjData* d, mjtNum* state) {
         // the grid collision only acts on nodes inside the geoms, and the stencil mixes in the
         // velocity of nodes outside: push particles that still end up inside back to the surface
         for (int a = 0; a < 3; a++) x[3*p+a] += dt * vp[a];
-        Collide(m, d, x + 3*p, vp, c.p_mass, /*project=*/true, xfrc_thread_[thread].data());
+        Collide(m, d, x + 3*p, vp, c.p_mass, kContactTol * c.dx, /*project=*/true,
+                xfrc_thread_[thread].data());
         std::memcpy(v + 3*p, vp, sizeof(vp));
         std::memcpy(Cs + 9*p, C, sizeof(C));
 

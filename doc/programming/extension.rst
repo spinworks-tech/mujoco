@@ -281,6 +281,15 @@ implement custom actuators, so far only a PID controller. See the `README
 <https://github.com/google-deepmind/mujoco/blob/main/plugin/actuator/README.md>`__ for details.
 
 
+mpm
+"""
+The plugin in the `mpm/ <https://github.com/google-deepmind/mujoco/tree/main/plugin/mpm>`__ directory simulates sand,
+liquids and elastic solids as particles with the material point method, coupled two-way with the rigid bodies. The
+particles live in the plugin state and are drawn by the plugin's ``visualize`` callback. The same solver and XML
+configuration run on the GPU in MuJoCo Warp and MJX. See the `README
+<https://github.com/google-deepmind/mujoco/blob/main/plugin/mpm/README.md>`__ for details.
+
+
 sensor
 """"""
 The plugins in the `sensor/ <https://github.com/google-deepmind/mujoco/tree/main/plugin/sensor>`__ directory implement
