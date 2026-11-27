@@ -13,7 +13,7 @@
 # limitations under the License.
 
 set(MUJOCO_MPM_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../..
-                            ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+                       ${CMAKE_CURRENT_SOURCE_DIR}/../../src
 )
 
 set(MUJOCO_MPM_SRCS
@@ -23,6 +23,9 @@ set(MUJOCO_MPM_SRCS
 )
 
 add_library(mpm SHARED)
+set_target_properties(
+  mpm PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/mujoco_plugin"
+)
 target_sources(mpm PRIVATE ${MUJOCO_MPM_SRCS})
 target_include_directories(mpm PRIVATE ${MUJOCO_MPM_INCLUDE})
 target_link_libraries(mpm PRIVATE mujoco)

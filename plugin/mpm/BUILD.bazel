@@ -1,4 +1,4 @@
-# An actuator plugin which implements a configurable PID controller.
+# An engine plugin which simulates sand, liquids and elastic solids with the material point method.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//:build_defs.bzl", "MJ_ROOT")
@@ -9,10 +9,15 @@ cc_library(
     hdrs = ["mpm.h"],
     conlyopts = ["-std=c11"],
     copts = [
-        "-I" + MJ_ROOT + "/include",
         "-I" + MJ_ROOT + "/src",
+        "-ffp-contract=off",
+        "-fvisibility=hidden",
     ],
-    cxxopts = ["-std=c++20"],
+    cxxopts = [
+        "-fvisibility-inlines-hidden",
+        "-std=c++20",
+    ],
+    linkstatic = True,
     local_defines = [
         "MUJOCO_DLL_EXPORTS",
         "_GNU_SOURCE",
@@ -30,10 +35,15 @@ cc_library(
     ],
     conlyopts = ["-std=c11"],
     copts = [
-        "-I" + MJ_ROOT + "/include",
         "-I" + MJ_ROOT + "/src",
+        "-ffp-contract=off",
+        "-fvisibility=hidden",
     ],
-    cxxopts = ["-std=c++20"],
+    cxxopts = [
+        "-fvisibility-inlines-hidden",
+        "-std=c++20",
+    ],
+    linkstatic = True,
     local_defines = [
         "MUJOCO_DLL_EXPORTS",
         "_GNU_SOURCE",
