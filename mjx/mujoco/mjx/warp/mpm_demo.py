@@ -41,14 +41,12 @@ _XML = """
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom type="plane" size="1 1 .1" material="grid"/>
-    <!-- tray walls thicker than a grid cell, or particles leak through -->
     <geom type="box" pos=" .24 0 .05" size=".03 .27 .05" rgba=".5 .5 .55 .3"/>
     <geom type="box" pos="-.24 0 .05" size=".03 .27 .05" rgba=".5 .5 .55 .3"/>
     <geom type="box" pos="0  .24 .05" size=".21 .03 .05" rgba=".5 .5 .55 .3"/>
     <geom type="box" pos="0 -.24 .05" size=".21 .03 .05" rgba=".5 .5 .55 .3"/>
     <body name="paddle" pos="0 0 .05">
       <joint name="hinge" axis="0 0 1" armature=".05" damping=".1"/>
-      <!-- 3 cm thick: geoms thinner than a grid cell (2.5 cm) leak particles -->
       <geom type="box" pos=".1 0 0" size=".1 .015 .04" rgba=".8 .2 .2 1"
             contype="2" conaffinity="0"/>
       <geom type="cylinder" size=".015 .06" rgba=".3 .3 .3 1"

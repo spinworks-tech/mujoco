@@ -100,6 +100,20 @@ class MPMTest(parameterized.TestCase):
       heights[material] = np.percentile(x[..., 2], 95)
     self.assertGreater(heights[mpm.Material.SAND], 2.0 * heights[mpm.Material.LIQUID])
 
+  def test_thin_plate_holds_particles(self):
+    """A plate thinner than a grid cell still stops the particles: none get inside or through it."""
+    xml = """
+    <mujoco>
+      <option timestep="0.002"/>
+      <worldbody>
+        <geom type="box" pos="0 0 0.05" size="0.15 0.15 0.004"/>
+      </worldbody>
+    </mujoco>
+    """
+    m, d, mm, md = _setup(xml, material=mpm.Material.SAND)
+    x, _ = _run(m, d, mm, md, 300)
+    self.assertGreater(x[..., 2].min(), 0.054 - 1e-4)
+
   def test_reaction_supports_weight(self):
     """The particles resting on a static box push it down with their weight."""
     xml = """

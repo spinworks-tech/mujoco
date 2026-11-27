@@ -82,7 +82,6 @@ class MPMModel:
   mu: float
   lam: float
   sand_alpha: float
-  margin: float
 
 
 @dataclasses.dataclass
@@ -128,7 +127,6 @@ def make_model(
   friction_angle: float = 45.0,
   p_vol: float | None = None,
   nsubstep: int | None = None,
-  margin: float = 0.0,
 ) -> MPMModel:
   """Creates the MPM parameters.
 
@@ -143,9 +141,6 @@ def make_model(
     friction_angle: SAND friction angle in degrees.
     p_vol: volume per particle, defaults to (dx/2)^3 (8 particles per cell, see sample_box).
     nsubstep: MPM substeps per MuJoCo step, defaults to the elastic-wave CFL limit.
-    margin: grid nodes closer than this to a geom collide with it (default 0). Lets geoms
-      thinner than a cell stop particles, but enlarges the coupling zone, which makes
-      heavy free bodies rebound off the particles; prefer geoms thicker than dx.
   """
   pos = np.asarray(pos, dtype=np.float32).reshape(-1, 3)
   lower = np.asarray(lower, dtype=np.float32)
@@ -176,7 +171,6 @@ def make_model(
     mu=float(mu),
     lam=float(lam),
     sand_alpha=math.sqrt(2.0 / 3.0) * 2.0 * sin_phi / (3.0 - sin_phi),
-    margin=float(margin or 0.0),
   )
 
 
@@ -310,6 +304,77 @@ def _geom_sdf(geom_type: int, p: wp.vec3, size: wp.vec3):
   return 1.0e10, wp.vec3(0.0)
 
 
+@wp.func
+def _collide(
+  # Model:
+  ngeom: int,
+  body_rootid: wp.array[int],
+  geom_type: wp.array[int],
+  geom_contype: wp.array[int],
+  geom_conaffinity: wp.array[int],
+  geom_bodyid: wp.array[int],
+  geom_size: wp.array2d[wp.vec3],
+  geom_friction: wp.array2d[wp.vec3],
+  # Data in:
+  xipos_in: wp.array2d[wp.vec3],
+  geom_xpos_in: wp.array2d[wp.vec3],
+  geom_xmat_in: wp.array2d[wp.mat33],
+  subtree_com_in: wp.array2d[wp.vec3],
+  cvel_in: wp.array2d[wp.spatial_vector],
+  # In:
+  worldid: int,
+  pos: wp.vec3,
+  v: wp.vec3,
+  mass: float,
+  step_dt: float,
+  project: bool,
+  # Out:
+  xfrc_out: wp.array2d[wp.spatial_vector],
+):
+  """Contact of a point (grid node or particle) with the geoms.
+
+  Stops the inward velocity relative to each geom it is inside of, with
+  Coulomb friction, adds the reaction to xfrc_out, and if project, moves pos out
+  of the geoms it is inside. Returns the new pos and v.
+  """
+  for geomid in range(ngeom):
+    if geom_contype[geomid] == 0 and geom_conaffinity[geomid] == 0:
+      continue
+    rot = geom_xmat_in[worldid, geomid]
+    local = wp.transpose(rot) @ (pos - geom_xpos_in[worldid, geomid])
+    phi, n_local = _geom_sdf(geom_type[geomid], local, geom_size[worldid % geom_size.shape[0], geomid])
+    if phi >= 0.0:
+      continue
+    n = wp.normalize(rot @ n_local)
+    if project and phi < 0.0:
+      pos -= phi * n
+
+    # velocity of the geom at the point; cvel is (rot, lin) about the root subtree com
+    bodyid = geom_bodyid[geomid]
+    cvel = cvel_in[worldid, bodyid]
+    offset = pos - subtree_com_in[worldid, body_rootid[bodyid]]
+    v_rigid = wp.spatial_bottom(cvel) + wp.cross(wp.spatial_top(cvel), offset)
+
+    # stop the inward motion, Coulomb friction on the tangential motion
+    rel = v - v_rigid
+    vn = wp.dot(rel, n)
+    if vn >= 0.0:
+      continue
+    vt = rel - vn * n
+    vt_norm = wp.length(vt)
+    friction = geom_friction[worldid % geom_friction.shape[0], geomid][0]
+    if vt_norm > 1.0e-10:
+      vt *= wp.max(0.0, 1.0 + friction * vn / vt_norm)
+    v_new = v_rigid + vt
+
+    # reaction on the body, averaged over the MuJoCo step
+    f = -mass * (v_new - v) / step_dt
+    torque = wp.cross(pos - xipos_in[worldid, bodyid], f)
+    wp.atomic_add(xfrc_out, worldid, bodyid, wp.spatial_vector(f, torque))
+    v = v_new
+  return pos, v
+
+
 @wp.kernel
 def _grid_update(
   # Model:
@@ -334,7 +399,6 @@ def _grid_update(
   res: wp.vec3i,
   lower: wp.vec3,
   dx: float,
-  margin: float,
   grid_m_in: wp.array4d[float],
   # In/Out:
   grid_mv: wp.array4d[wp.vec3],
@@ -344,44 +408,14 @@ def _grid_update(
   mass = grid_m_in[worldid, i, j, k]
   if mass <= 0.0:
     return
-  dt = opt_timestep[worldid % opt_timestep.shape[0]] / float(nsubstep)
-  v = grid_mv[worldid, i, j, k] / mass + dt * opt_gravity[worldid % opt_gravity.shape[0]]
+  step_dt = opt_timestep[worldid % opt_timestep.shape[0]]
+  v = grid_mv[worldid, i, j, k] / mass + (step_dt / float(nsubstep)) * opt_gravity[worldid % opt_gravity.shape[0]]
   pos = lower + dx * wp.vec3(float(i), float(j), float(k))
-
-  for geomid in range(ngeom):
-    if geom_contype[geomid] == 0 and geom_conaffinity[geomid] == 0:
-      continue
-    rot = geom_xmat_in[worldid, geomid]
-    local = wp.transpose(rot) @ (pos - geom_xpos_in[worldid, geomid])
-    phi, n_local = _geom_sdf(geom_type[geomid], local, geom_size[worldid % geom_size.shape[0], geomid])
-    # ponytail: geoms thinner than dx leak particles; port Genesis' CPIC if that matters.
-    if phi >= margin:
-      continue
-    n = wp.normalize(rot @ n_local)
-
-    # velocity of the geom at the node; cvel is (rot, lin) about the root subtree com
-    bodyid = geom_bodyid[geomid]
-    cvel = cvel_in[worldid, bodyid]
-    offset = pos - subtree_com_in[worldid, body_rootid[bodyid]]
-    v_rigid = wp.spatial_bottom(cvel) + wp.cross(wp.spatial_top(cvel), offset)
-
-    # stop the inward motion, Coulomb friction on the tangential motion
-    rel = v - v_rigid
-    vn = wp.dot(rel, n)
-    if vn >= 0.0:
-      continue
-    vt = rel - vn * n
-    vt_norm = wp.length(vt)
-    friction = geom_friction[worldid % geom_friction.shape[0], geomid][0]
-    if vt_norm > 1.0e-10:
-      vt *= wp.max(0.0, 1.0 + friction * vn / vt_norm)
-    v_new = v_rigid + vt
-
-    # reaction on the body, averaged over the MuJoCo step
-    f = -mass * (v_new - v) / (dt * float(nsubstep))
-    torque = wp.cross(pos - xipos_in[worldid, bodyid], f)
-    wp.atomic_add(xfrc_out, worldid, bodyid, wp.spatial_vector(f, torque))
-    v = v_new
+  pos, v = _collide(
+    ngeom, body_rootid, geom_type, geom_contype, geom_conaffinity, geom_bodyid, geom_size, geom_friction,
+    xipos_in, geom_xpos_in, geom_xmat_in, subtree_com_in, cvel_in,
+    worldid, pos, v, mass, step_dt, False, xfrc_out,
+  )  # fmt: skip
 
   # domain walls
   idx = wp.vec3i(i, j, k)
@@ -394,13 +428,28 @@ def _grid_update(
 @wp.kernel
 def _g2p(
   # Model:
+  ngeom: int,
   opt_timestep: wp.array[float],
+  body_rootid: wp.array[int],
+  geom_type: wp.array[int],
+  geom_contype: wp.array[int],
+  geom_conaffinity: wp.array[int],
+  geom_bodyid: wp.array[int],
+  geom_size: wp.array2d[wp.vec3],
+  geom_friction: wp.array2d[wp.vec3],
+  # Data in:
+  xipos_in: wp.array2d[wp.vec3],
+  geom_xpos_in: wp.array2d[wp.vec3],
+  geom_xmat_in: wp.array2d[wp.mat33],
+  subtree_com_in: wp.array2d[wp.vec3],
+  cvel_in: wp.array2d[wp.spatial_vector],
   # MPM:
   material: int,
   nsubstep: int,
   res: wp.vec3i,
   lower: wp.vec3,
   dx: float,
+  p_mass: float,
   mu: float,
   lam: float,
   sand_alpha: float,
@@ -411,9 +460,11 @@ def _g2p(
   C_out: wp.array2d[wp.mat33],
   F: wp.array2d[wp.mat33],
   Jp: wp.array2d[float],
+  xfrc_out: wp.array2d[wp.spatial_vector],
 ):
   worldid, pid = wp.tid()
-  dt = opt_timestep[worldid % opt_timestep.shape[0]] / float(nsubstep)
+  step_dt = opt_timestep[worldid % opt_timestep.shape[0]]
+  dt = step_dt / float(nsubstep)
   inv_dx = 1.0 / dx
   base, fx, w = _stencil(x[worldid, pid], lower, inv_dx, res)
   v = wp.vec3(0.0)
@@ -426,9 +477,17 @@ def _g2p(
         gv = grid_v_in[worldid, base[0] + i, base[1] + j, base[2] + k]
         v += weight * gv
         C += (4.0 * inv_dx * inv_dx * weight) * wp.outer(gv, dpos)
+
+  # the grid collision only acts on nodes inside the geoms, and the stencil mixes in the
+  # velocity of nodes outside: push particles that still end up inside back to the surface
+  xp, v = _collide(
+    ngeom, body_rootid, geom_type, geom_contype, geom_conaffinity, geom_bodyid, geom_size, geom_friction,
+    xipos_in, geom_xpos_in, geom_xmat_in, subtree_com_in, cvel_in,
+    worldid, x[worldid, pid] + dt * v, v, p_mass, step_dt, True, xfrc_out,
+  )  # fmt: skip
+  x[worldid, pid] = xp
   v_out[worldid, pid] = v
   C_out[worldid, pid] = C
-  x[worldid, pid] += dt * v
 
   Fp = (wp.identity(3, dtype=float) + dt * C) @ F[worldid, pid]
   if material == _LIQUID:
@@ -551,7 +610,6 @@ def step_arrays(
         mm.grid_res,
         mm.lower,
         mm.dx,
-        mm.margin,
         grid_m,
       ],
       outputs=[grid_mv, xfrc],
@@ -559,6 +617,31 @@ def step_arrays(
     wp.launch(
       _g2p,
       dim=(nworld, mm.nparticle),
-      inputs=[opt_timestep, mm.material, mm.nsubstep, mm.grid_res, mm.lower, mm.dx, mm.mu, mm.lam, mm.sand_alpha, grid_mv],
-      outputs=[x, v, C, F, Jp],
+      inputs=[
+        geom_type.shape[0],
+        opt_timestep,
+        body_rootid,
+        geom_type,
+        geom_contype,
+        geom_conaffinity,
+        geom_bodyid,
+        geom_size,
+        geom_friction,
+        xipos,
+        geom_xpos,
+        geom_xmat,
+        subtree_com,
+        cvel,
+        mm.material,
+        mm.nsubstep,
+        mm.grid_res,
+        mm.lower,
+        mm.dx,
+        mm.p_mass,
+        mm.mu,
+        mm.lam,
+        mm.sand_alpha,
+        grid_mv,
+      ],
+      outputs=[x, v, C, F, Jp, xfrc],
     )
