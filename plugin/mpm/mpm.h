@@ -41,7 +41,8 @@ struct MpmConfig {
   mjtNum sand_alpha = 0;
   std::vector<mjtNum> pos;  // initial particle positions (nparticle x 3)
 
-  // Reads and validates the config of a plugin instance; calls mju_error if invalid.
+  // Reads and validates the config of a plugin instance; calls mju_error if
+  // invalid.
   static MpmConfig FromModel(const mjModel* m, int instance);
 };
 
@@ -72,8 +73,10 @@ class Mpm {
   std::vector<mjtNum> grid_mv_;  // node momentum, then velocity
   std::vector<mjtNum> grid_m_;   // node mass
   std::vector<mjtNum> affine_;   // per particle: stress and APIC momentum (9)
-  std::vector<mjtNum> svd_;      // per particle: SVD of F (U 9, sig 3, V 9), sand reuses it
-  std::vector<int> slab_, slab_order_, slab_start_;  // particles bucketed by stencil base x
+  std::vector<mjtNum>
+      svd_;  // per particle: SVD of F (U 9, sig 3, V 9), sand reuses it
+  std::vector<int> slab_, slab_order_,
+      slab_start_;  // particles bucketed by stencil base x
   std::vector<std::vector<mjtNum>> xfrc_thread_;  // reaction, per thread
 };
 

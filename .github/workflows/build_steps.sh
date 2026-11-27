@@ -269,7 +269,7 @@ configure_mujoco() {
 
 build_mujoco_core() {
     echo "Building MuJoCo core and plugins..."
-    cmake --build . --config=Release --target mujoco actuator sensor sdf_plugin ${CMAKE_BUILD_ARGS}
+    cmake --build . --config=Release --target mujoco actuator mpm sensor sdf_plugin ${CMAKE_BUILD_ARGS}
 }
 
 
@@ -304,6 +304,7 @@ copy_plugins_posix() {
     echo "Copying plugins..."
     mkdir -p ${TMPDIR}/mujoco_install/mujoco_plugin &&
     find lib -maxdepth 2 -name "libactuator.*" -exec cp {} ${TMPDIR}/mujoco_install/mujoco_plugin \; &&
+    find lib -maxdepth 2 -name "libmpm.*" -exec cp {} ${TMPDIR}/mujoco_install/mujoco_plugin \; &&
     find lib -maxdepth 2 -name "libsensor.*" -exec cp {} ${TMPDIR}/mujoco_install/mujoco_plugin \; &&
     find lib -maxdepth 2 -name "libsdf_plugin.*" -exec cp {} ${TMPDIR}/mujoco_install/mujoco_plugin \;
 }
@@ -317,6 +318,7 @@ copy_plugins_window() {
         dll_dir="bin/Release"
     fi
     cp ${dll_dir}/actuator.dll ${TMPDIR}/mujoco_install/mujoco_plugin &&
+    cp ${dll_dir}/mpm.dll ${TMPDIR}/mujoco_install/mujoco_plugin &&
     cp ${dll_dir}/sensor.dll ${TMPDIR}/mujoco_install/mujoco_plugin
 }
 

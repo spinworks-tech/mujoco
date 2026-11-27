@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for the mujoco.mpm plugin. Parity with the MuJoCo Warp solver is tested from Python,
-// in mjx/mujoco/mjx/warp/mpm_test.py.
+// Tests for the mujoco.mpm plugin. Parity with the MuJoCo Warp solver is tested
+// from Python, in mjx/mujoco/mjx/warp/mpm_test.py.
 
 #include <algorithm>
 #include <cmath>
@@ -39,7 +39,8 @@ using ::testing::NotNull;
 constexpr mjtNum kDx = 0.02;
 constexpr mjtNum kG = 9.81;
 
-// a 10 cm cube of particles above the origin, in a [-0.3, 0.3]^2 x [-0.1, 0.5] domain
+// a 10 cm cube of particles above the origin, in a [-0.3, 0.3]^2 x [-0.1, 0.5]
+// domain
 constexpr char kXml[] = R"(
 <mujoco>
   <option timestep="0.002"/>
@@ -63,20 +64,23 @@ constexpr char kXml[] = R"(
 
 constexpr char kFloor[] = R"(<geom type="plane" size="1 1 0.1"/>)";
 
-std::string Xml(const std::string& world, const std::string& material = "elastic",
+std::string Xml(const std::string& world,
+                const std::string& material = "elastic",
                 const std::string& box = "-0.05 -0.05 0.1 0.05 0.05 0.2",
                 const std::string& extra = "") {
-  return absl::StrReplaceAll(kXml, {{"MATERIAL", material}, {"BOX", box}, {"EXTRA", extra},
+  return absl::StrReplaceAll(kXml, {{"MATERIAL", material},
+                                    {"BOX", box},
+                                    {"EXTRA", extra},
                                     {"WORLD", world}});
 }
 
 struct Particles {
   int n;
   const mjtNum* state;
-  const mjtNum* x(int p) const { return state + 3*p; }
-  const mjtNum* v(int p) const { return state + 3*n + 3*p; }
-  const mjtNum* F(int p) const { return state + 15*n + 9*p; }
-  const mjtNum* xfrc(int body) const { return state + 25*n + 6*body; }
+  const mjtNum* x(int p) const { return state + 3 * p; }
+  const mjtNum* v(int p) const { return state + 3 * n + 3 * p; }
+  const mjtNum* F(int p) const { return state + 15 * n + 9 * p; }
+  const mjtNum* xfrc(int body) const { return state + 25 * n + 6 * body; }
 };
 
 Particles GetParticles(const mjModel* m, const mjData* d) {
@@ -90,7 +94,8 @@ void Step(const mjModel* m, mjData* d, int nstep) {
 
 TEST_F(MpmTest, FreeFall) {
   // without colliding geoms the block falls ballistically and keeps its shape
-  std::string world = R"(<geom type="plane" size="1 1 0.1" contype="0" conaffinity="0"/>)";
+  std::string world =
+      R"(<geom type="plane" size="1 1 0.1" contype="0" conaffinity="0"/>)";
   char error[1024];
   MjModelPtr m = LoadModelFromString(Xml(world), error, sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
@@ -107,19 +112,22 @@ TEST_F(MpmTest, FreeFall) {
     z += p.x(i)[2] / p.n;
     vz += p.v(i)[2] / p.n;
     vxy = std::max({vxy, std::abs(p.v(i)[0]), std::abs(p.v(i)[1])});
-    for (int j = 0; j < 9; j++) dF = std::max(dF, std::abs(p.F(i)[j] - (j % 4 == 0)));
+    for (int j = 0; j < 9; j++)
+      dF = std::max(dF, std::abs(p.F(i)[j] - (j % 4 == 0)));
   }
   EXPECT_NEAR(vz, -kG * t, 1e-3 * kG * t);
   EXPECT_NEAR(z - z0, -0.5 * kG * t * t, 0.02 * 0.5 * kG * t * t);
-  EXPECT_LT(vxy, 1e-8);
-  EXPECT_LT(dF, 1e-6);
+  EXPECT_LT(vxy, MjTol(1e-8, 1e-4));
+  EXPECT_LT(dF, MjTol(1e-6, 1e-4));
 }
 
 TEST_F(MpmTest, RestOnPlane) {
-  // a block dropped on the floor neither passes through it nor leaves the domain
+  // a block dropped on the floor neither passes through it nor leaves the
+  // domain
   for (const char* material : {"elastic", "sand", "liquid"}) {
     char error[1024];
-    MjModelPtr m = LoadModelFromString(Xml(kFloor, material), error, sizeof(error));
+    MjModelPtr m =
+        LoadModelFromString(Xml(kFloor, material), error, sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 800);
@@ -144,8 +152,9 @@ TEST_F(MpmTest, SandPilesLiquidSpreads) {
   const char* materials[2] = {"sand", "liquid"};
   for (int i = 0; i < 2; i++) {
     char error[1024];
-    MjModelPtr m = LoadModelFromString(Xml(kFloor, materials[i], "-0.04 -0.04 0 0.04 0.04 0.16"),
-                                       error, sizeof(error));
+    MjModelPtr m = LoadModelFromString(
+        Xml(kFloor, materials[i], "-0.04 -0.04 0 0.04 0.04 0.16"), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 300);
@@ -160,7 +169,8 @@ TEST_F(MpmTest, SandPilesLiquidSpreads) {
 
 TEST_F(MpmTest, ThinPlateHoldsParticles) {
   // a plate thinner than a grid cell still stops the particles
-  std::string world = R"(<geom type="box" pos="0 0 0.05" size="0.15 0.15 0.004"/>)";
+  std::string world =
+      R"(<geom type="box" pos="0 0 0.05" size="0.15 0.15 0.004"/>)";
   char error[1024];
   MjModelPtr m = LoadModelFromString(Xml(world, "sand"), error, sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
@@ -176,9 +186,11 @@ TEST_F(MpmTest, ReactionSupportsWeight) {
       R"(<body name="table" pos="0 0 0.05"><geom type="box" size="0.15 0.15 0.05"/></body>)";
   char error[1024];
   for (const char* density : {"1000", "1600"}) {
-    std::string extra = std::string(R"(<config key="density" value=")") + density + R"("/>)";
+    std::string extra =
+        std::string(R"(<config key="density" value=")") + density + R"("/>)";
     MjModelPtr m = LoadModelFromString(
-        Xml(world, "elastic", "-0.05 -0.05 0.12 0.05 0.05 0.2", extra), error, sizeof(error));
+        Xml(world, "elastic", "-0.05 -0.05 0.12 0.05 0.05 0.2", extra), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 500);
@@ -200,12 +212,13 @@ TEST_F(MpmTest, TwoWayCoupling) {
       <geom type="box" size="0.03 0.03 0.03" density="1000" contype="2" conaffinity="2"/>
     </body>)";
   char error[1024];
-  MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.08 -0.08 0 0.08 0.08 0.1"), error,
-                                     sizeof(error));
+  MjModelPtr m = LoadModelFromString(
+      Xml(world, "sand", "-0.08 -0.08 0 0.08 0.08 0.1"), error, sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
   MjDataPtr d = MakeData(m);
   Step(m.get(), d.get(), 400);
-  EXPECT_GT(d->xpos[5], 0.06);  // resting in the sand (half size 0.03), not on the floor
+  EXPECT_GT(d->xpos[5],
+            0.06);  // resting in the sand (half size 0.03), not on the floor
   EXPECT_LT(d->xpos[5], 0.14);
   for (int i = 0; i < 3; i++) EXPECT_LT(std::abs(d->qvel[i]), 0.05);
 }
@@ -215,10 +228,11 @@ TEST_F(MpmTest, FrictionAngleSetsPileHeight) {
   const char* angle[2] = {"20", "45"};
   for (int i = 0; i < 2; i++) {
     char error[1024];
-    std::string extra =
-        std::string(R"(<config key="friction_angle" value=")") + angle[i] + R"("/>)";
-    MjModelPtr m = LoadModelFromString(Xml(kFloor, "sand", "-0.04 -0.04 0 0.04 0.04 0.16", extra),
-                                       error, sizeof(error));
+    std::string extra = std::string(R"(<config key="friction_angle" value=")") +
+                        angle[i] + R"("/>)";
+    MjModelPtr m = LoadModelFromString(
+        Xml(kFloor, "sand", "-0.04 -0.04 0 0.04 0.04 0.16", extra), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 300);
@@ -232,22 +246,26 @@ TEST_F(MpmTest, FrictionAngleSetsPileHeight) {
 }
 
 TEST_F(MpmTest, GeomFrictionSlowsSliding) {
-  // sand on a 20 degree slope slides freely without geom friction, and much less with it
+  // sand on a 20 degree slope slides freely without geom friction, and much
+  // less with it
   mjtNum slide[2];
   const char* friction[2] = {"0.01", "1"};
   for (int i = 0; i < 2; i++) {
     std::string world =
-        std::string(R"(<geom type="plane" size="1 1 0.1" euler="0 20 0" friction=")") +
+        std::string(
+            R"(<geom type="plane" size="1 1 0.1" euler="0 20 0" friction=")") +
         friction[i] + R"("/>)";
     char error[1024];
-    MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.05 -0.05 0.03 0.05 0.05 0.09"), error,
-                                       sizeof(error));
+    MjModelPtr m = LoadModelFromString(
+        Xml(world, "sand", "-0.05 -0.05 0.03 0.05 0.05 0.09"), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 120);
     Particles p = GetParticles(m.get(), d.get());
     slide[i] = 0;
-    for (int j = 0; j < p.n; j++) slide[i] += p.x(j)[0] / p.n;  // starts centred on x = 0
+    for (int j = 0; j < p.n; j++)
+      slide[i] += p.x(j)[0] / p.n;  // starts centred on x = 0
   }
   EXPECT_GT(slide[0], 2 * slide[1]);
   EXPECT_GT(slide[1], 0);
@@ -255,14 +273,19 @@ TEST_F(MpmTest, GeomFrictionSlowsSliding) {
 
 TEST_F(MpmTest, GeomTypesHoldParticles) {
   // sand poured on each geom type flows around it: no particle ends up inside
-  using Sdf = std::function<mjtNum(const mjtNum*)>;  // distance of a point in the geom frame
-  auto norm = [](mjtNum x, mjtNum y, mjtNum z) { return std::sqrt(x*x + y*y + z*z); };
+  using Sdf = std::function<mjtNum(const mjtNum*)>;  // distance of a point in
+                                                     // the geom frame
+  auto norm = [](mjtNum x, mjtNum y, mjtNum z) {
+    return std::sqrt(x * x + y * y + z * z);
+  };
   std::vector<std::pair<std::string, Sdf>> geoms = {
       {R"(type="sphere" size="0.06")",
        [&](const mjtNum* p) { return norm(p[0], p[1], p[2]) - 0.06; }},
       {R"(type="capsule" size="0.04 0.05")",
        [&](const mjtNum* p) {
-         return norm(p[0], p[1], p[2] - std::clamp(p[2], -0.05, 0.05)) - 0.04;
+         return norm(p[0], p[1],
+                     p[2] - std::clamp(p[2], mjtNum(-0.05), mjtNum(0.05))) -
+                0.04;
        }},
       {R"(type="cylinder" size="0.06 0.03")",
        [&](const mjtNum* p) {
@@ -270,17 +293,22 @@ TEST_F(MpmTest, GeomTypesHoldParticles) {
        }},
       // first-order distance, exact at the surface
       {R"(type="ellipsoid" size="0.08 0.05 0.03")",
-       [&](const mjtNum* p) { return (norm(p[0] / 0.08, p[1] / 0.05, p[2] / 0.03) - 1) * 0.03; }},
+       [&](const mjtNum* p) {
+         return (norm(p[0] / 0.08, p[1] / 0.05, p[2] / 0.03) - 1) * 0.03;
+       }},
       {R"(type="box" size="0.06 0.05 0.03")",
        [&](const mjtNum* p) {
-         return std::max({std::abs(p[0]) - 0.06, std::abs(p[1]) - 0.05, std::abs(p[2]) - 0.03});
+         return std::max({std::abs(p[0]) - 0.06, std::abs(p[1]) - 0.05,
+                          std::abs(p[2]) - 0.03});
        }},
   };
   for (const auto& [geom, sdf] : geoms) {
-    std::string world = std::string(kFloor) + "<geom pos=\"0 0 0.07\" " + geom + "/>";
+    std::string world =
+        std::string(kFloor) + "<geom pos=\"0 0 0.07\" " + geom + "/>";
     char error[1024];
-    MjModelPtr m = LoadModelFromString(Xml(world, "sand", "-0.05 -0.05 0.14 0.05 0.05 0.24"), error,
-                                       sizeof(error));
+    MjModelPtr m = LoadModelFromString(
+        Xml(world, "sand", "-0.05 -0.05 0.14 0.05 0.05 0.24"), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 300);
@@ -300,12 +328,13 @@ TEST_F(MpmTest, GeomTypesHoldParticles) {
 TEST_F(MpmTest, DomainWallsHoldParticles) {
   // liquid thrown at the domain walls stays inside
   char error[1024];
-  MjModelPtr m = LoadModelFromString(Xml(kFloor, "liquid"), error, sizeof(error));
+  MjModelPtr m =
+      LoadModelFromString(Xml(kFloor, "liquid"), error, sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
   MjDataPtr d = MakeData(m);
   Particles p = GetParticles(m.get(), d.get());
   mjtNum* v = d->plugin_state + m->plugin_stateadr[0] + 3 * p.n;
-  for (int i = 0; i < p.n; i++) v[3*i] = 3, v[3*i+1] = -2;
+  for (int i = 0; i < p.n; i++) v[3 * i] = 3, v[3 * i + 1] = -2;
   Step(m.get(), d.get(), 300);
   mjtNum xmax = -1;
   for (int i = 0; i < p.n; i++) {
@@ -334,8 +363,8 @@ TEST_F(MpmTest, TwoInstances) {
     </plugin>)";
   MjModelPtr m1 = LoadModelFromString(one, error, sizeof(error));
   ASSERT_THAT(m1.get(), NotNull()) << error;
-  MjModelPtr m2 = LoadModelFromString(absl::StrReplaceAll(one, {{"</plugin>", second}}), error,
-                                      sizeof(error));
+  MjModelPtr m2 = LoadModelFromString(
+      absl::StrReplaceAll(one, {{"</plugin>", second}}), error, sizeof(error));
   ASSERT_THAT(m2.get(), NotNull()) << error;
   ASSERT_EQ(m2->nplugin, 2);
   MjDataPtr d1 = MakeData(m1);
@@ -343,13 +372,14 @@ TEST_F(MpmTest, TwoInstances) {
   Step(m1.get(), d1.get(), 100);
   Step(m2.get(), d2.get(), 100);
   for (int i = 0; i < m1->npluginstate; i++) {
-    ASSERT_EQ(d1->plugin_state[i], d2->plugin_state[m2->plugin_stateadr[0] + i]) << i;
+    ASSERT_EQ(d1->plugin_state[i], d2->plugin_state[m2->plugin_stateadr[0] + i])
+        << i;
   }
   // the liquid fell too
   int n = (m2->plugin_statenum[1] - 6 * m2->nbody) / 25;
   EXPECT_EQ(n, 512);
   const mjtNum* x = d2->plugin_state + m2->plugin_stateadr[1];
-  for (int i = 0; i < n; i++) EXPECT_LT(x[3*i+2], 0.1);
+  for (int i = 0; i < n; i++) EXPECT_LT(x[3 * i + 2], 0.1);
 }
 
 TEST_F(MpmTest, ResetAndCopy) {
@@ -357,7 +387,8 @@ TEST_F(MpmTest, ResetAndCopy) {
   MjModelPtr m = LoadModelFromString(Xml(kFloor, "sand"), error, sizeof(error));
   ASSERT_THAT(m.get(), NotNull()) << error;
   MjDataPtr d = MakeData(m);
-  std::vector<mjtNum> initial(d->plugin_state, d->plugin_state + m->npluginstate);
+  std::vector<mjtNum> initial(d->plugin_state,
+                              d->plugin_state + m->npluginstate);
   Step(m.get(), d.get(), 100);
 
   // a copy continues exactly like the original
@@ -369,7 +400,8 @@ TEST_F(MpmTest, ResetAndCopy) {
   }
 
   mj_resetData(m.get(), d.get());
-  for (int i = 0; i < m->npluginstate; i++) ASSERT_EQ(d->plugin_state[i], initial[i]) << i;
+  for (int i = 0; i < m->npluginstate; i++)
+    ASSERT_EQ(d->plugin_state[i], initial[i]) << i;
 }
 
 TEST_F(MpmTest, ThreadCountDoesNotChangeResult) {
@@ -377,9 +409,11 @@ TEST_F(MpmTest, ThreadCountDoesNotChangeResult) {
   const char* nthread[2] = {"1", "4"};
   for (int i = 0; i < 2; i++) {
     char error[1024];
-    std::string extra = std::string(R"(<config key="nthread" value=")") + nthread[i] + R"("/>)";
-    MjModelPtr m = LoadModelFromString(Xml(kFloor, "sand", "-0.05 -0.05 0.1 0.05 0.05 0.2", extra),
-                                       error, sizeof(error));
+    std::string extra =
+        std::string(R"(<config key="nthread" value=")") + nthread[i] + R"("/>)";
+    MjModelPtr m = LoadModelFromString(
+        Xml(kFloor, "sand", "-0.05 -0.05 0.1 0.05 0.05 0.2", extra), error,
+        sizeof(error));
     ASSERT_THAT(m.get(), NotNull()) << error;
     MjDataPtr d = MakeData(m);
     Step(m.get(), d.get(), 100);
@@ -392,13 +426,17 @@ TEST_F(MpmTest, ThreadCountDoesNotChangeResult) {
 
 TEST_F(MpmTest, InvalidConfig) {
   char error[1024];
-  EXPECT_THAT(LoadModelFromString(Xml(kFloor, "mud"), error, sizeof(error)), IsNull());
-  EXPECT_THAT(error, HasSubstr("material must be elastic, liquid or sand"));
-  EXPECT_THAT(LoadModelFromString(Xml(kFloor, "sand", "-0.05 -0.05 0.4 0.05 0.05 0.6"), error,
-                                  sizeof(error)),
+  EXPECT_THAT(LoadModelFromString(Xml(kFloor, "mud"), error, sizeof(error)),
               IsNull());
+  EXPECT_THAT(error, HasSubstr("material must be elastic, liquid or sand"));
+  EXPECT_THAT(
+      LoadModelFromString(Xml(kFloor, "sand", "-0.05 -0.05 0.4 0.05 0.05 0.6"),
+                          error, sizeof(error)),
+      IsNull());
   EXPECT_THAT(error, HasSubstr("inside [lower, upper]"));
-  EXPECT_THAT(LoadModelFromString(Xml(kFloor, "sand", "0 0 0.1"), error, sizeof(error)), IsNull());
+  EXPECT_THAT(
+      LoadModelFromString(Xml(kFloor, "sand", "0 0 0.1"), error, sizeof(error)),
+      IsNull());
   EXPECT_THAT(error, HasSubstr("'box' needs 6 numbers"));
 }
 
