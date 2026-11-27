@@ -7,6 +7,7 @@ licenses(["notice"])
 
 cc_test(
     name = "mpm_test",
+    timeout = "long",
     srcs = ["mpm_test.cc"],
     conlyopts = ["-std=c11"],
     copts = [
@@ -15,6 +16,8 @@ cc_test(
         "-ffp-contract=off",
     ],
     cxxopts = ["-std=c++20"],
+    # unoptimized (bazel's default fastbuild), the particle simulations take minutes
+    shard_count = 4,
     deps = [
         "//:mujoco",
         "//plugin/mpm:register",
