@@ -3,8 +3,8 @@
 Sand, liquid and elastic solids simulated with the material point method
 (MLS-MPM, ported from Genesis) and coupled two-way with the rigid bodies.
 
-This plugin runs on the CPU, in standard MuJoCo, `simulate` and the Unity
-plugin. The same solver runs on the GPU in MuJoCo Warp and MJX
+This plugin runs on the CPU, in standard MuJoCo and `simulate`. The same solver
+runs on the GPU in MuJoCo Warp and MJX
 (`mjx/mujoco/mjx/third_party/mujoco_warp/_src/mpm.py`), for parallel training.
 Both read the same XML configuration and produce matching trajectories, up to
 float32 rounding (tested in `mpm_test.py` there).
@@ -61,11 +61,6 @@ the next step, as in MuJoCo Warp, where it goes through `xfrc_applied`.
 
 - **MuJoCo, `simulate`:** build the `mpm` target and put the library in the
   plugin directory. `simulate` draws the particles.
-- **Unity:** build the plugin against the same MuJoCo version as the Unity
-  package's library, and copy it to `Packages/org.mujoco/Runtime/Plugins/`.
-  Importing the XML creates an `MjMpmParticles` component, which draws the
-  particles with GPU instancing. Assign it a material that supports instancing
-  if you're not on the built-in render pipeline.
 - **Python, MJX training:** build the plugin against the installed `mujoco`
   package and load it with `mujoco.mj_loadPluginLibrary`. The command below
   builds it on Linux:

@@ -184,7 +184,7 @@ _PLUGIN_XML = """
 
 @absltest.skipUnless(_PLUGIN, "set MUJOCO_MPM_PLUGIN to the mujoco.mpm plugin library")
 class CPluginTest(parameterized.TestCase):
-  """The C plugin (CPU MuJoCo, Unity) and this solver (MJWarp, MJX) agree, from one XML."""
+  """The C plugin (CPU MuJoCo) and this solver (MJWarp, MJX) agree, from one XML."""
 
   @classmethod
   def setUpClass(cls):

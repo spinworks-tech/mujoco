@@ -115,7 +115,7 @@ def sample_box(lo, hi, spacing: float) -> np.ndarray:
 
 
 def from_spec(spec, name: str | None = None) -> dict:
-  """Reads a mujoco.mpm plugin instance (plugin/mpm, the CPU MuJoCo and Unity side) from spec.
+  """Reads a mujoco.mpm plugin instance (plugin/mpm, the CPU MuJoCo side) from spec.
 
   Returns the keyword arguments of make() / make_model() (pos, lower, upper, dx, material, ...),
   so one XML drives both. Removes the instance from spec: compile the spec afterwards, so that

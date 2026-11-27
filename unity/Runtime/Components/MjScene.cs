@@ -177,8 +177,6 @@ public class MjScene : MonoBehaviour {
 
   private unsafe void CompileScene(
       XmlDocument mjcf, IEnumerable<MjComponent> components) {
-    // Plugins are otherwise only loaded by the importer; loading again is a no-op.
-    MjEngineTool.LoadPlugins();
     Model = MjEngineTool.LoadModelFromString(mjcf.OuterXml);
     if (Model == null) {
       throw new NullReferenceException("Model loading failed, see other errors for root cause.");
@@ -416,17 +414,6 @@ public class MjScene : MonoBehaviour {
                             components.Where(component => component is MjBaseSensor)
                                 .OrderBy(component => component.transform.GetSiblingIndex()),
                             "sensor"));
-
-    // Engine plugin instances.
-    var mpmParticles = components.Where(component => component is MjMpmParticles).ToList();
-    if (mpmParticles.Any()) {
-      var plugin = (XmlElement)MjRoot.AppendChild(doc.CreateElement("extension"))
-          .AppendChild(doc.CreateElement("plugin"));
-      plugin.SetAttribute("plugin", "mujoco.mpm");
-      foreach (var component in mpmParticles) {
-        plugin.AppendChild(component.GenerateMjcf(_generationContext.GenerateName(component), doc));
-      }
-    }
     // Generate the Mjcf of the runtime dependencies added to the context.
     _generationContext.GenerateMjcf(MjRoot);
     return doc;

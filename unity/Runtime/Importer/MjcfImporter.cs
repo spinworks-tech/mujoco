@@ -219,12 +219,6 @@ public class MjcfImporter {
       }
     }
 
-    // MPM particles (the mujoco.mpm engine plugin).
-    var mpmInstances = mujocoNode.SelectNodes("extension/plugin[@plugin='mujoco.mpm']/instance");
-    foreach (var instance in mpmInstances.OfType<XmlElement>()) {
-      CreateGameObjectWithUniqueName<MjMpmParticles>(rootObject, instance);
-    }
-
     // This section references tendons, actuators and worldbody elements, must be parsed last.
     var sensorNode = mujocoNode.SelectSingleNode("sensor") as XmlElement;
     if (sensorNode != null) {

@@ -14,7 +14,7 @@
 -->
 
 <!-- A motor-driven paddle plows a sand tray and a ball drops in: the scene of
-     mjx/mujoco/mjx/warp/mpm_demo.py, for the mujoco.mpm plugin (CPU MuJoCo, Unity).
+     mjx/mujoco/mjx/warp/mpm_demo.py, for the mujoco.mpm plugin (CPU MuJoCo).
      The same file configures the GPU solver: mujoco_warp mpm.from_spec. -->
 <mujoco model="MPM sand tray">
   <option timestep="0.002"/>
