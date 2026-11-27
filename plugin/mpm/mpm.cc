@@ -27,7 +27,9 @@
 #include <mujoco/mujoco.h>
 
 // A port of mjx/mujoco/mjx/third_party/mujoco_warp/_src/mpm.py; keep the two in
-// sync.
+// sync. Implements MLS-MPM (Hu et al. 2018) with fixed-corotated elasticity
+// (Stomakhin et al. 2012) and Drucker-Prager sand (Klar et al. 2016),
+// following the structure of Genesis' MPMSolver (Apache-2.0).
 
 namespace mujoco::plugin::mpm {
 namespace {

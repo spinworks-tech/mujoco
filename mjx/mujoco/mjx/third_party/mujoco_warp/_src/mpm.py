@@ -15,10 +15,12 @@
 
 """Material point method (MLS-MPM) coupled to MuJoCo Warp rigid bodies.
 
-Ported from Genesis' MPMSolver (genesis/engine/solvers/mpm_solver.py and
-genesis/engine/materials/MPM). Particles live on a fixed, dense grid per world,
-so every array has a leading world dimension and batches like the rest of
-MJWarp.
+Implements MLS-MPM (Hu et al. 2018) with fixed-corotated elasticity (Stomakhin
+et al. 2012) and Drucker-Prager sand (Klar et al. 2016), following the
+structure of Genesis' MPMSolver (Apache-2.0;
+genesis/engine/solvers/mpm_solver.py and genesis/engine/materials/MPM).
+Particles live on a fixed, dense grid per world, so every array has a leading
+world dimension and batches like the rest of MJWarp.
 
 Usage:
   mm, md = mpm.make(m, d, pos, lower, upper, dx, material=mpm.Material.SAND)

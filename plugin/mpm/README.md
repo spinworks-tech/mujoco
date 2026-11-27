@@ -1,7 +1,10 @@
 # MPM particles (`mujoco.mpm`)
 
-Sand, liquid and elastic solids simulated with the material point method
-(MLS-MPM, ported from Genesis) and coupled two-way with the rigid bodies.
+Sand, liquid and elastic solids simulated with the material point method and
+coupled two-way with the rigid bodies. The solver implements MLS-MPM (Hu et al.
+2018) with fixed-corotated elasticity (Stomakhin et al. 2012) and
+Drucker-Prager sand (Klar et al. 2016), following the structure of Genesis'
+`MPMSolver` (Apache-2.0).
 
 This plugin runs on the CPU, in standard MuJoCo and `simulate`. The same solver
 runs on the GPU in MuJoCo Warp and MJX
