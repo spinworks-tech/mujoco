@@ -114,6 +114,40 @@ def sample_box(lo, hi, spacing: float) -> np.ndarray:
   return np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3).astype(np.float32)
 
 
+def from_spec(spec, name: str | None = None) -> dict:
+  """Reads a mujoco.mpm plugin instance (plugin/mpm, the CPU MuJoCo and Unity side) from spec.
+
+  Returns the keyword arguments of make() / make_model() (pos, lower, upper, dx, material, ...),
+  so one XML drives both. Removes the instance from spec: compile the spec afterwards, so that
+  MJX doesn't carry the plugin's particle state in every world. Parsing the XML needs the plugin
+  library loaded (mujoco.mj_loadPluginLibrary).
+  """
+  found = [p for p in spec.plugins if p.plugin_name == "mujoco.mpm" and name in (None, p.name)]
+  if len(found) != 1:
+    raise ValueError(f"expected one mujoco.mpm plugin instance{f' named {name}' if name else ''}, found {len(found)}.")
+  cfg = dict(found[0].config)
+  spec.delete(found[0])
+
+  def num(key):
+    return np.array(cfg[key].split(), dtype=float)
+
+  dx = float(cfg["dx"])
+  box = num("box")
+  kwargs = dict(
+    pos=sample_box(box[:3], box[3:], 0.5 * dx),
+    lower=num("lower"),
+    upper=num("upper"),
+    dx=dx,
+    material=Material[cfg.get("material", "elastic").upper()],
+  )
+  for key, arg in (("young", "E"), ("poisson", "nu"), ("density", "rho"), ("friction_angle", "friction_angle")):
+    if key in cfg:
+      kwargs[arg] = float(cfg[key])
+  if "nsubstep" in cfg:
+    kwargs["nsubstep"] = int(cfg["nsubstep"])
+  return kwargs
+
+
 def make_model(
   timestep: float,
   pos: np.ndarray,

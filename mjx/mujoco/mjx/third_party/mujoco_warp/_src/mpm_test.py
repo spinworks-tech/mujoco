@@ -15,6 +15,8 @@
 
 """Tests for the material point method."""
 
+import os
+
 import mujoco
 import numpy as np
 import warp as wp
@@ -156,6 +158,81 @@ class MPMTest(parameterized.TestCase):
     z = d.xpos.numpy()[0, 1, 2]
     self.assertGreater(z, 0.1)  # resting on the block (half size 0.03), not on the floor
     self.assertLess(z, 0.17)
+
+
+# the mujoco.mpm plugin (plugin/mpm), built against the installed mujoco package
+_PLUGIN = os.environ.get("MUJOCO_MPM_PLUGIN")
+
+_PLUGIN_XML = """
+<mujoco>
+  <option timestep="0.002"/>
+  <extension><plugin plugin="mujoco.mpm"><instance name="particles">
+    <config key="material" value="{material}"/>
+    <config key="dx" value="0.02"/>
+    <config key="young" value="1e5"/>
+    <config key="lower" value="-0.3 -0.3 -0.1"/>
+    <config key="upper" value="0.3 0.3 0.5"/>
+    <config key="box" value="{box}"/>
+  </instance></plugin></extension>
+  <worldbody>
+    <geom type="plane" size="1 1 .1"/>
+    {world}
+  </worldbody>
+</mujoco>
+"""
+
+
+@absltest.skipUnless(_PLUGIN, "set MUJOCO_MPM_PLUGIN to the mujoco.mpm plugin library")
+class CPluginTest(parameterized.TestCase):
+  """The C plugin (CPU MuJoCo, Unity) and this solver (MJWarp, MJX) agree, from one XML."""
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+    mujoco.mj_loadPluginLibrary(_PLUGIN)
+
+  def _run(self, xml, nstep, coupled):
+    spec = mujoco.MjSpec.from_string(xml)
+    mjm_c = spec.compile()
+    d_c = mujoco.MjData(mjm_c)
+    kwargs = mpm.from_spec(spec)
+    mjm = spec.compile()
+    self.assertEqual(mjm.nplugin, 0)
+    mjd = mujoco.MjData(mjm)
+    mujoco.mj_forward(mjm, mjd)
+    m = mjw.put_model(mjm)
+    d = mjw.put_data(mjm, mjd)
+    mm, md = mpm.make(m, d, **kwargs)
+    for _ in range(nstep):
+      mujoco.mj_step(mjm_c, d_c)
+      if coupled:
+        mjw.step(m, d)
+      mpm.step(m, d, mm, md)
+      if coupled:
+        wp.copy(d.xfrc_applied, md.xfrc)
+    n = mm.nparticle
+    self.assertEqual(mjm_c.plugin_statenum[0], 25 * n + 6 * mjm_c.nbody)
+    return d_c, d, d_c.plugin_state[: 3 * n].reshape(n, 3), md.x.numpy()[0]
+
+  @parameterized.parameters("elastic", "liquid", "sand")
+  def test_particles_match(self, material):
+    """Particles dropped on a plane and a tilted box: same trajectories, up to float32 rounding."""
+    world = '<geom type="box" pos="0.03 0 0.04" size="0.03 0.08 0.04" euler="0 20 30"/>'
+    xml = _PLUGIN_XML.format(material=material, box="-0.06 -0.05 0.1 0.06 0.05 0.2", world=world)
+    _, _, x_c, x_w = self._run(xml, 300, coupled=False)
+    np.testing.assert_allclose(x_c, x_w, atol=1e-3)
+    self.assertLess(np.abs(x_c - x_w).mean(), 1e-4)
+
+  def test_coupling_matches(self):
+    """A free box sinking into sand: same rigid trajectory."""
+    world = """
+      <body pos="0.01 0 0.17"><freejoint/>
+        <geom type="box" size="0.03 0.03 0.03" density="300" contype="2" conaffinity="2"/>
+      </body>"""
+    xml = _PLUGIN_XML.format(material="sand", box="-0.08 -0.08 0 0.08 0.08 0.1", world=world)
+    d_c, d, _, _ = self._run(xml, 300, coupled=True)
+    self.assertLess(d_c.qpos[2], 0.12)  # sank into the sand
+    np.testing.assert_allclose(d_c.qpos[:3], d.qpos.numpy()[0, :3], atol=1e-3)
 
 
 if __name__ == "__main__":
