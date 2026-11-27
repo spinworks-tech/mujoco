@@ -221,6 +221,27 @@ class MPMTest(parameterized.TestCase):
     np.testing.assert_allclose(force[2], -weight, rtol=0.1)
     np.testing.assert_allclose(force[:2], 0.0, atol=0.05 * weight)
 
+  @parameterized.parameters(2, 3)
+  def test_p_vol_sets_mass(self, per_cell):
+    """Sampling a block more densely, with p_vol to match, doesn't change its weight."""
+    xml = """
+    <mujoco>
+      <option timestep="0.002"/>
+      <worldbody>
+        <body name="table" pos="0 0 0.05">
+          <geom type="box" size="0.15 0.15 0.05"/>
+        </body>
+      </worldbody>
+    </mujoco>
+    """
+    spacing = _DX / per_cell
+    pos = mpm.sample_box((-0.05, -0.05, 0.12), (0.05, 0.05, 0.2), spacing)
+    m, d, mm, md = _setup(xml, pos=pos, p_vol=spacing**3)
+    _run(m, d, mm, md, 500)
+    weight = 1000.0 * 0.1 * 0.1 * 0.08 * _G
+    np.testing.assert_allclose(mm.nparticle * mm.p_mass * _G, weight, rtol=1e-5)
+    np.testing.assert_allclose(md.xfrc.numpy()[0, 1, 2], -weight, rtol=0.1)
+
   def test_two_way_coupling(self):
     """A free box falling on sand sinks in, and is then held up by the particles."""
     xml = """
